@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm: file manager a pannello singolo, senza librerie TUI esterne.
+# fm: file manager a uno o due pannelli, senza librerie TUI esterne.
 # Richiede Bash >= 4 (array associativi), stty e i comandi GNU di base.
 set -u
 
@@ -7,7 +7,7 @@ usage() {
     cat <<'HELP'
 Uso: fm [DIRECTORY]
 
-File manager TUI a pannello singolo (Bash, senza ncurses).
+File manager TUI a uno o due pannelli (Bash, senza ncurses).
 
  Frecce Su/Giu                   seleziona la riga (stile Lynx)
  Freccia Destra / Invio           apre dir o avvia file eseguibile
@@ -16,14 +16,16 @@ File manager TUI a pannello singolo (Bash, senza ncurses).
  F2                               rinomina il file o la directory
  F3 (oppure Spazio)              seleziona/deseleziona
  F4                               edita con $EDITOR (oppure nano)
- F5                               copia nella directory richiesta
- F6                               sposta nella directory richiesta
+ F5                               copia nell’altro pannello (o chiede destinazione)
+ F6                               sposta nell’altro pannello (o chiede destinazione)
  F7                               crea una directory
  F8                               cancella (chiede conferma)
  F10                              esci dal file manager
  Ctrl+X poi C                     finestra permessi stile MC
  Ctrl+X poi O                     finestra proprietario/gruppo
  Ctrl+S                           crea link assoluto <nome>.lnk
+ Ctrl+F                           filtro per nome (vuoto per rimuoverlo)
+ Tab                              cambia pannello (da 100 colonne)
  Mouse click                      seleziona / doppio click apre
  Rotella mouse                    scorre l'elenco
  r                                aggiorna la lista
@@ -75,7 +77,10 @@ actions_y=0
 last_click_ms=0
 last_click_path=''
 MOUSE_BTN=0; MOUSE_X=0; MOUSE_Y=0; MOUSE_ACTION=''
-PENDING_CHAR='' 
+PENDING_CHAR=''
+active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' resized=0
+declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '')
+declare -A pane_marks=()
 # Coordinate di rendering: righe salvate per evitare redraw completi.
 needs_full=1
 painted_rows=0 painted_cols=0 painted_scroll=-1 painted_cursor=-1
@@ -129,7 +134,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
-trap ':' WINCH
+trap 'resized=1; needs_full=1' WINCH
 stty -echo -icanon -icrnl -ixon min 1 time 0 <&9 || exit 1
 init_theme
 (( alt_screen )) && printf '\033[?1049h' >&9
@@ -187,8 +192,64 @@ size() {
     dimensions=$(stty size <&9 2>/dev/null) || dimensions='24 80'
     read -r rows cols <<< "$dimensions"
     [[ $rows =~ ^[0-9]+$ && $cols =~ ^[0-9]+$ ]] || { rows=24; cols=80; }
-    inner=$((cols-2))
+    dual_pane=0
+    (( cols >= 100 )) && dual_pane=1
+    pane_geometry "$active_pane"
     visible=$((rows-8))
+}
+
+# Lo stato del pannello attivo resta nelle variabili usate dalle operazioni.
+pane_geometry() {
+    pane_x=1; pane_width=$cols
+    if (( dual_pane )); then
+        pane_width=$((cols/2))
+        if (( $1 == 1 )); then
+            pane_x=$((pane_width+1))
+            pane_width=$((cols-pane_width))
+        fi
+    fi
+    inner=$((pane_width-2))
+}
+
+save_pane() {
+    local key path
+    pane_dirs[active_pane]=$cwd
+    pane_cursors[active_pane]=$cursor
+    pane_scrolls[active_pane]=$scroll
+    pane_filters[active_pane]=$filter
+    for key in "${!pane_marks[@]}"; do
+        [[ $key == "$active_pane:"* ]] && unset 'pane_marks[$key]'
+    done
+    for path in "${!marks[@]}"; do
+        pane_marks["$active_pane:$path"]=1
+    done
+}
+
+load_pane() {
+    local id=$1 key
+    cwd=${pane_dirs[id]}; cursor=${pane_cursors[id]}
+    scroll=${pane_scrolls[id]}; filter=${pane_filters[id]}
+    reload
+    for key in "${!pane_marks[@]}"; do
+        [[ $key == "$id:"* ]] && marks["${key#*:}"]=1
+    done
+}
+
+switch_pane() {
+    (( dual_pane )) || return 0
+    save_pane
+    active_pane=$((1-active_pane))
+    load_pane "$active_pane"
+    pane_geometry "$active_pane"
+    last_click_path=''; last_click_ms=0
+}
+
+filter_items() {
+    if ! ask 'Filtro nome (vuoto = tutti, Esc annulla): '; then return; fi
+    filter=$REPLY
+    cursor=1; scroll=0
+    reload
+    notice="Filtro: ${filter:-tutti}"
 }
 
 now_millis() {
@@ -210,10 +271,12 @@ now_millis() {
 }
 
 reload() {
-    local path
+    local path name
     local -a dirs=() files=()
     entries=('..')
     for path in "$cwd"/*; do
+        name=${path##*/}
+        [[ ${name,,} == *"${filter,,}"* ]] || continue
         [[ -d $path ]] && dirs+=("$path") || files+=("$path")
     done
     entries+=("${dirs[@]}" "${files[@]}")
@@ -280,7 +343,7 @@ paint_entry() {
     local idx=$1 n item label selected kind row_style
     (( idx >= scroll && idx < scroll+visible )) || return 0
     n=$((idx-scroll))
-    printf '\033[%d;1H' "$((items_y+n))" >&9
+    printf '\033[%d;%dH' "$((items_y+n))" "$pane_x" >&9
     if (( idx >= ${#entries[@]} )); then
         line_text ''
         return
@@ -302,11 +365,51 @@ paint_entry() {
         kind='*'; row_style=$CLR_EXEC
     fi
     [[ -v marks["$item"] ]] && row_style=$CLR_MARKED
-    if (( idx == cursor )); then
+    if (( idx == cursor && ${drawing_pane:-$active_pane} == active_pane )); then
         row_style=$CLR_CURSOR
         [[ -v marks["$item"] ]] && row_style=$CLR_MARK_CURSOR
     fi
     line_text " $selected $kind$label" "$row_style"
+}
+
+draw_panel() {
+    local drawing_pane=$1 cwd cursor scroll filter pane_x pane_width inner needs_full
+    local -a entries=()
+    local -A marks=()
+    local i title
+    load_pane "$drawing_pane"
+    pane_geometry "$drawing_pane"
+    sync_scroll
+    title=" $cwd"
+    (( drawing_pane == active_pane )) && title=" * $cwd"
+    [[ -n $filter ]] && title+=" [Filtro: $filter]"
+    printf '\033[1;%dH' "$pane_x" >&9
+    border top
+    printf '\033[2;%dH' "$pane_x" >&9
+    line_text "$title" "$CLR_TITLE"
+    printf '\033[3;%dH' "$pane_x" >&9
+    border mid
+    for ((i=0; i<visible; i++)); do paint_entry "$((scroll+i))"; done
+    printf '\033[%d;%dH' "$((visible+4))" "$pane_x" >&9
+    border bottom
+}
+
+draw_dual() {
+    local inner=$((cols-2))
+    save_pane
+    draw_panel 0
+    draw_panel 1
+    printf '\033[%d;1H' "$actions_y" >&9
+    render_actions
+    line_text ' Tab: cambia lato | Ctrl+F: filtro | F5/F6: trasferisci nel pannello opposto' "$CLR_STATUS"
+    line_text " $notice" "$CLR_NOTICE"
+    border bottom
+}
+
+draw_notice() {
+    local inner=$((cols-2))
+    printf '\033[%d;1H' "$notice_y" >&9
+    line_text " $notice" "$CLR_NOTICE"
 }
 
 draw() {
@@ -327,27 +430,30 @@ draw() {
     if (( needs_full || rows != painted_rows || cols != painted_cols || scroll != painted_scroll )); then
         # Riscrive alle posizioni fisse senza pulire tutto lo schermo.
         # Il bordo inferiore non emette CRLF, eliminando lo scroll terminale.
-        printf '\033[H' >&9
-        border top
-        line_text " fm  $cwd" "$CLR_TITLE"
-        border mid
-        for ((i=0; i<visible; i++)); do
-            paint_entry "$((scroll+i))"
-        done
-        printf '\033[%d;1H' "$((visible+4))" >&9
-        border mid
-        render_actions
-        line_text ' Lynx: Su/Giu scegli, Destra entra, Sinistra torna. Mouse attivo; q Esci.' "$CLR_STATUS"
-        line_text " $notice" "$CLR_NOTICE"
-        border bottom
+        if (( dual_pane )); then
+            draw_dual
+        else
+            printf '\033[H' >&9
+            border top
+            line_text " fm  $cwd${filter:+ [Filtro: $filter]}" "$CLR_TITLE"
+            border mid
+            for ((i=0; i<visible; i++)); do
+                paint_entry "$((scroll+i))"
+            done
+            printf '\033[%d;1H' "$((visible+4))" >&9
+            border mid
+            render_actions
+            line_text ' Frecce: naviga | Ctrl+F: filtro | q/F10: esci' "$CLR_STATUS"
+            line_text " $notice" "$CLR_NOTICE"
+            border bottom
+        fi
         needs_full=0
     else
         # In navigazione aggiorna solo la vecchia e la nuova riga.
         (( painted_cursor != cursor )) && paint_entry "$painted_cursor"
         paint_entry "$cursor"
         if [[ $painted_notice != "$notice" ]]; then
-            printf '\033[%d;1H' "$notice_y" >&9
-            line_text " $notice" "$CLR_NOTICE"
+            draw_notice
         fi
     fi
     painted_rows=$rows; painted_cols=$cols
@@ -362,7 +468,10 @@ input_key() {
     if [[ -n $PENDING_CHAR ]]; then
         char=$PENDING_CHAR; PENDING_CHAR=''
     else
-        IFS= read -rsn1 -u9 char || return 1
+        if ! IFS= read -rsn1 -u9 char; then
+            # WINCH puo' interrompere read anche quando ha gia' ricevuto un tasto.
+            [[ -n $char ]] || return 1
+        fi
     fi
     case $char in
         $'\e')
@@ -415,6 +524,8 @@ input_key() {
         $'\177'|$'\b') KEY='BACK';;
         ' ') KEY='F3';;
         $'\023') KEY='SYMLINK';;
+        $'\006') KEY='FILTER';;
+        $'\t') KEY='TAB';;
         $'\030')
             # Sequenza MC: Ctrl+X poi C o O.
             IFS= read -rsn1 -u9 next || return 1
@@ -524,12 +635,20 @@ transfer_items() {
         notice='Seleziona prima un elemento.'
         return
     fi
-    if ! ask 'Directory di destinazione (Esc annulla): '; then return; fi
-    destination=$REPLY
-    [[ $destination != /* ]] && destination="$cwd/$destination"
-    if [[ -z $REPLY ]] || ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
-        notice='Directory di destinazione non valida.'
-        return
+    if (( dual_pane )); then
+        destination=${pane_dirs[1-active_pane]}
+        if ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
+            notice='Directory del pannello opposto non accessibile.'
+            return
+        fi
+    else
+        if ! ask 'Directory di destinazione (Esc annulla): '; then return; fi
+        destination=$REPLY
+        [[ $destination != /* ]] && destination="$cwd/$destination"
+        if [[ -z $REPLY ]] || ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
+            notice='Directory di destinazione non valida.'
+            return
+        fi
     fi
     for src in "${targets[@]}"; do
         dst="$destination/${src##*/}"
@@ -935,6 +1054,9 @@ handle_mouse() {
     local idx i x y now path relx
     x=$MOUSE_X
     y=$MOUSE_Y
+    if (( dual_pane && y >= items_y && y < items_y+visible )); then
+        if (( (x > cols/2) != active_pane )); then switch_pane; fi
+    fi
     if (( MOUSE_BTN == 64 )); then
         ((cursor > 0)) && ((cursor-=1))
         notice='Rotella su.'
@@ -947,12 +1069,12 @@ handle_mouse() {
     fi
     [[ $MOUSE_ACTION != M ]] && return
     (( MOUSE_BTN != 0 )) && return
-    if (( x > 1 && x < cols && y >= items_y && y < items_y + visible )); then
+    if (( x > pane_x && x < pane_x+pane_width-1 && y >= items_y && y < items_y + visible )); then
         idx=$((scroll + y - items_y))
         if (( idx >= 0 && idx < ${#entries[@]} )); then
             cursor=$idx
             # La colonna 3 contiene il simbolo di marcatura (*).
-            if (( x == 3 )) && [[ ${entries[idx]} != '..' ]]; then
+            if (( x == pane_x+2 )) && [[ ${entries[idx]} != '..' ]]; then
                 select_current
                 return
             fi
@@ -990,6 +1112,8 @@ perform_key() {
         END) cursor=$((${#entries[@]}-1));;
         ENTER|RIGHT|l) enter_dir;;
         LEFT|h|BACK) cwd=$(cd -P -- "$cwd/.." && pwd -P); cursor=1; scroll=0; reload;;
+        TAB) switch_pane;;
+        FILTER) filter_items;;
         F2) rename_item;;
         F3) select_current;;
         F4) edit_item;;
@@ -1013,7 +1137,11 @@ reload
 (( ${#entries[@]} > 1 )) && cursor=1
 while :; do
     draw
-    if ! input_key; then break; fi
+    if ! input_key; then
+        if (( resized )); then resized=0; continue; fi
+        break
+    fi
+    if (( resized )); then resized=0; draw; fi
     if (( rows < 12 || cols < 35 )); then
         [[ $KEY == q || $KEY == Q ]] && break
         continue

@@ -6,6 +6,7 @@ import fcntl
 import os
 import pathlib
 import pty
+import signal
 import subprocess
 import struct
 import tempfile
@@ -73,6 +74,11 @@ class Session:
     def type(self, text: str):
         for ch in text.encode("utf-8"):
             self.key(bytes([ch]))
+
+    def resize(self, cols: int):
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 28, cols, 0, 0))
+        os.kill(self.pid, signal.SIGWINCH)
+        self.drain(0.2)
 
     def close(self):
         self.key(b"q")
@@ -698,8 +704,144 @@ def test_move_multiple_relative_destination():
             session.close()
 
 
+
+def test_filter_names_and_reset():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "ALPHA.txt").write_text("alpha")
+        (root / "beta.txt").write_text("beta")
+        session = Session(root)
+        try:
+            session.key(b"\x06")
+            session.type("alpha")
+            start = len(session.output)
+            session.key(ENTER)
+            assert b"ALPHA.txt" in session.output[start:]
+            assert b"beta.txt" not in session.output[start:]
+            session.key(F3)
+            session.key(F8)
+            session.type("s")
+            session.key(ENTER)
+            assert not (root / "ALPHA.txt").exists()
+            assert (root / "beta.txt").exists()
+            session.key(b"\x06")
+            session.key(ENTER)
+            session.key(F2)
+            session.type("reset.txt")
+            session.key(ENTER)
+            assert (root / "reset.txt").read_text() == "beta"
+        finally:
+            session.close()
+
+
+def test_dual_copy_move_and_independent_selection():
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = fixture(pathlib.Path(tmp))
+        session = Session(src, cols=120)
+        try:
+            session.key(F3)  # seleziona tree a sinistra
+            session.key(DOWN)
+            session.key(F3)  # seleziona alpha
+            session.key(b"\t")
+            session.key(LEFT)
+            session.key(ENTER)  # dest a destra
+            session.key(b"\t")
+            session.key(F5)  # copia subito nell'altro pannello
+            assert (dst / "tree" / "deep.txt").read_text() == "profondo"
+            assert (dst / "alpha.txt").read_text() == "alpha"
+            assert (src / "alpha.txt").exists()
+            session.key(END)
+            session.key(F6)  # sposta file space.txt
+            assert (dst / "file space.txt").read_text() == "spazi"
+            assert not (src / "file space.txt").exists()
+            session.key(b"\t")
+            session.key(END)
+            session.key(F6)  # trasferimento nella direzione inversa
+            assert (src / "file space.txt").exists()
+            assert not (dst / "file space.txt").exists()
+        finally:
+            session.close()
+
+
+def test_dual_filter_and_mouse_focus():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "alpha.txt").write_text("alpha")
+        (root / "beta.txt").write_text("beta")
+        session = Session(root, cols=120)
+        try:
+            session.key(b"\x06")
+            session.type("alpha")
+            session.key(ENTER)
+            session.mouse(0, 70, 6)  # beta nel pannello destro non filtrato
+            session.key(F2)
+            session.type("gamma.txt")
+            session.key(ENTER)
+            assert (root / "gamma.txt").read_text() == "beta"
+            session.key(b"\t")
+            session.key(F2)
+            session.type("filtered.txt")
+            session.key(ENTER)
+            assert (root / "filtered.txt").read_text() == "alpha"
+        finally:
+            session.close()
+
+
+
+def test_resize_preserves_panes_and_selection():
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = fixture(pathlib.Path(tmp))
+        session = Session(src, cols=120)
+        try:
+            session.key(F3)  # tree a sinistra
+            session.key(b"\t")
+            session.key(LEFT)
+            session.key(ENTER)  # dest a destra
+            session.resize(80)
+            session.key(F7)
+            session.type("narrow")
+            session.key(ENTER)
+            assert (dst / "narrow").is_dir()
+            session.resize(121)
+            session.key(b"\t")
+            session.key(F5)
+            assert (dst / "tree" / "deep.txt").read_text() == "profondo"
+            assert not (dst / "alpha.txt").exists()
+        finally:
+            session.close()
+
+
+def test_dual_no_overwrite_and_literal_filter():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        src, dst = fixture(root)
+        (src / "[a].txt").write_text("letterale")
+        (dst / "[a].txt").write_text("esistente")
+        session = Session(src, cols=120)
+        try:
+            session.key(b"\t")
+            session.key(LEFT)
+            session.key(ENTER)
+            session.key(b"\t")
+            session.key(b"\x06")
+            session.type("[a]")
+            session.key(ENTER)
+            session.key(F6)
+            assert (src / "[a].txt").read_text() == "letterale"
+            assert (dst / "[a].txt").read_text() == "esistente"
+            session.key(b"\x06")
+            session.type("nessuna-corrispondenza")
+            session.key(ENTER)
+            session.key(F8)
+            assert b"Seleziona prima un elemento" in session.output[-3000:]
+        finally:
+            session.close()
+
+
 if __name__ == "__main__":
-    tests = [test_editor_fallback_and_arguments, test_mouse_rename_directory_wide_bar,
+    tests = [test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
+             test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
+             test_dual_filter_and_mouse_focus, test_editor_fallback_and_arguments, test_mouse_rename_directory_wide_bar,
              test_move_multiple_relative_destination, test_f2_rename_and_no_overwrite, test_f4_editor_interactive,
              test_move_no_overwrite_and_cancel, test_copy_multiple, test_cut_move, test_mkdir_and_delete, test_no_overwrite,
              test_filename_with_spaces, test_delete_cancelled, test_no_copy_into_self,
