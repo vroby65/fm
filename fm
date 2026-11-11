@@ -255,6 +255,22 @@ filter_items() {
     notice="Filtro: ${filter:-tutti}"
 }
 
+clear_filter() {
+    [[ -n $filter ]] || return 0
+    local current=${entries[cursor]} offset=$((cursor-scroll)) path i
+    local -a selected=("${!marks[@]}")
+    filter=''
+    reload
+    for path in "${selected[@]}"; do marks["$path"]=1; done
+    for i in "${!entries[@]}"; do
+        if [[ ${entries[i]} == "$current" ]]; then cursor=$i; break; fi
+    done
+    # Mantieni l'elemento sulla stessa riga anche per il secondo clic del mouse.
+    scroll=$((cursor-offset))
+    (( scroll < 0 )) && scroll=0
+    notice='Filtro rimosso.'
+}
+
 now_millis() {
     # EPOCHREALTIME segue LC_NUMERIC: in italiano puo' usare la virgola!
     # Non interpretare la stringa originale come intero Bash (bug riga 194).
@@ -1078,6 +1094,8 @@ handle_mouse() {
         idx=$((scroll + y - items_y))
         if (( idx >= 0 && idx < ${#entries[@]} )); then
             cursor=$idx
+            clear_filter
+            idx=$cursor
             # La colonna 3 contiene il simbolo di marcatura (*).
             if (( x == pane_x+2 )) && [[ ${entries[idx]} != '..' ]]; then
                 select_current
@@ -1108,6 +1126,9 @@ handle_mouse() {
 }
 
 perform_key() {
+    case $1 in
+        ENTER|RIGHT|l|F2|F3|F4|F5|F6|F7|F8|CHMOD|CHOWN|SYMLINK) clear_filter;;
+    esac
     case $1 in
         UP|k) ((cursor>0)) && ((cursor-=1));;
         DOWN|j) ((cursor+1<${#entries[@]})) && ((cursor+=1));;

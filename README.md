@@ -101,7 +101,7 @@ Da **100 colonne** in su compaiono automaticamente due pannelli affiancati, iniz
 
 Aprire la cartella di destinazione in un pannello, tornare con Tab al pannello sorgente, selezionare con **F3**, quindi premere **F5** per copiare o **F6** per spostare direttamente nell’altro pannello. Non serve un comando Incolla. Entrambi gli elenchi vengono aggiornati dopo l’operazione; le destinazioni esistenti non vengono sovrascritte.
 
-**Ctrl+F** chiede una parte del nome e **Invio** applica il filtro al solo pannello attivo, senza distinguere maiuscole e minuscole. Il testo è letterale, non un’espressione regolare o un glob. Il filtro comprende file e cartelle; `/..` resta sempre disponibile. Per rimuoverlo: Ctrl+F, testo vuoto, Invio. Esc annulla. Cambiare filtro o visibilità dei nascosti azzera la selezione di quel pannello; il filtro resta attivo durante la navigazione.
+**Ctrl+F** chiede una parte del nome e **Invio** applica il filtro al solo pannello attivo, senza distinguere maiuscole e minuscole. Il testo è letterale, non un’espressione regolare o un glob. Il filtro comprende file e cartelle; `/..` resta sempre disponibile. Per rimuoverlo: Ctrl+F, testo vuoto, Invio. Esc annulla. Cambiare filtro o visibilità dei nascosti azzera la selezione di quel pannello; il filtro si azzera quando si sceglie un elemento con un clic, F3/Spazio, Invio o un comando operativo. L’elemento scelto e le marcature vengono conservati nel nuovo elenco completo. Con le frecce Su/Giù si può continuare a scorrere i risultati senza azzerarlo.
 
 ## Esecuzione e gestione degli attributi
 

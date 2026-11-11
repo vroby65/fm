@@ -892,8 +892,62 @@ def test_ctrl_h_independent_panes_and_resize():
             session.close()
 
 
+
+def test_filter_clears_on_choice_and_keeps_current_file():
+    for choice in (F3, b" ", ENTER, "mouse"):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "alpha.txt").write_text("intatto")
+            (root / "target.txt").write_text("scelto")
+            session = Session(root)
+            try:
+                session.key(b"\x06")
+                session.type("target")
+                session.key(ENTER)
+                start = len(session.output)
+                if choice == "mouse":
+                    session.mouse(0, 10, 5)
+                else:
+                    session.key(choice)
+                assert b"alpha.txt" in session.output[start:], "Filtro non azzerato"
+                session.key(F2)
+                session.type("scelto.txt")
+                session.key(ENTER)
+                assert (root / "scelto.txt").read_text() == "scelto"
+                assert (root / "alpha.txt").read_text() == "intatto"
+            finally:
+                session.close()
+
+
+def test_filter_clears_on_directory_open_and_double_click():
+    for mouse in (False, True):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "a-other").mkdir()
+            (root / "target").mkdir()
+            (root / "target" / "inside.txt").write_text("visibile")
+            session = Session(root)
+            try:
+                session.key(b"\x06")
+                session.type("target")
+                session.key(ENTER)
+                if mouse:
+                    session.mouse(0, 10, 5)
+                    session.mouse(0, 10, 5)
+                else:
+                    session.key(ENTER)
+                assert b"inside.txt" in session.output[-6000:]
+                session.key(F7)
+                session.type("created")
+                session.key(ENTER)
+                assert (root / "target" / "created").is_dir()
+            finally:
+                session.close()
+
+
 if __name__ == "__main__":
-    tests = [test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
+    tests = [test_filter_clears_on_choice_and_keeps_current_file,
+             test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
              test_dual_filter_and_mouse_focus, test_editor_fallback_and_arguments, test_mouse_rename_directory_wide_bar,
