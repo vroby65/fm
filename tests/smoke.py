@@ -13,6 +13,7 @@ import termios
 import time
 
 SCRIPT = str(pathlib.Path(__file__).resolve().parents[1] / "fm")
+F2 = b"\x1bOQ"
 F3 = b"\x1bOR"
 F4 = b"\x1bOS"
 F5 = b"\x1b[15~"
@@ -108,10 +109,9 @@ def test_copy_multiple():
         s.key(F3)        # tree/ (prima directory)
         s.key(DOWN)      # alpha.txt
         s.key(F3)
-        s.key(F4)        # copia entrambi
-        s.key(BACK)      # parent
-        s.key(ENTER)     # dest (prima directory del parent)
-        s.key(F6)
+        s.key(F5)
+        s.type(str(dst))
+        s.key(ENTER)
         s.close()
         assert (dst / "tree" / "deep.txt").read_text() == "profondo"
         assert (dst / "alpha.txt").read_text() == "alpha"
@@ -123,10 +123,9 @@ def test_cut_move():
         src, dst = fixture(pathlib.Path(tmp))
         s = Session(src)
         s.key(DOWN)      # alpha.txt
-        s.key(F5)
-        s.key(BACK)
-        s.key(ENTER)
         s.key(F6)
+        s.type(str(dst))
+        s.key(ENTER)
         s.close()
         assert not (src / "alpha.txt").exists()
         assert (dst / "alpha.txt").read_text() == "alpha"
@@ -154,10 +153,9 @@ def test_no_overwrite():
         (dst / "alpha.txt").write_text("preesistente")
         s = Session(src)
         s.key(DOWN)
-        s.key(F4)
-        s.key(BACK)
+        s.key(F5)
+        s.type(str(dst))
         s.key(ENTER)
-        s.key(F6)
         s.close()
         assert (dst / "alpha.txt").read_text() == "preesistente", "File sovrascritto!"
 
@@ -167,10 +165,9 @@ def test_filename_with_spaces():
         src, dst = fixture(pathlib.Path(tmp))
         s = Session(src)
         s.key(END)       # file space.txt
-        s.key(F4)
-        s.key(BACK)
+        s.key(F5)
+        s.type(str(dst))
         s.key(ENTER)
-        s.key(F6)
         s.close()
         assert (dst / "file space.txt").read_text() == "spazi"
 
@@ -192,9 +189,9 @@ def test_no_copy_into_self():
         root = pathlib.Path(tmp)
         (root / "folder").mkdir()
         s = Session(root)
-        s.key(F4)        # copia folder
-        s.key(ENTER)     # entra in folder
-        s.key(F6)        # non deve fare folder/folder
+        s.key(F5)
+        s.type("folder")
+        s.key(ENTER)
         s.close()
         assert not (root / "folder" / "folder").exists()
 
@@ -223,7 +220,7 @@ def test_mouse_button_mkdir():
         root = pathlib.Path(tmp)
         s = Session(root)
         try:
-            s.mouse(0, 60, 25)
+            s.mouse(0, 33, 25)
             s.type("button-made")
             s.key(ENTER)
             assert (root / "button-made").is_dir(), "F7 via mouse non funziona"
@@ -251,10 +248,9 @@ def test_mouse_mark_copy():
         s = Session(src)
         try:
             s.mouse(0, 3, 6)
-            s.key(F4)
-            s.key(BACK)
+            s.key(F5)
+            s.type(str(dst))
             s.key(ENTER)
-            s.key(F6)
             assert (dst / "alpha.txt").read_text() == "alpha", "Selezione mouse non funziona"
         finally:
             s.close()
@@ -267,7 +263,7 @@ def test_mouse_compact_bar_and_wheel():
             (root / f"d{i:02d}").mkdir()
         s = Session(root, cols=40)
         try:
-            s.mouse(0, 27, 25)
+            s.mouse(0, 23, 25)
             s.type("small-window")
             s.key(ENTER)
             assert (root / "small-window").is_dir(), "F7 non cliccabile su finestra stretta"
@@ -353,10 +349,9 @@ def test_mouse_exact_columns_and_rows():
             # X=4 e' il prefisso, non il marcatore * (solo X=3).
             session.mouse(0, 4, 6)
             session.mouse(0, 1, 5)  # bordo: non deve cambiare riga
-            session.key(F4)
-            session.key(BACK)
+            session.key(F5)
+            session.type(str(dst))
             session.key(ENTER)
-            session.key(F6)
             assert (dst / "alpha.txt").is_file(), "Hitbox mouse sfalsata"
             assert not (dst / "tree").exists(), "Click sul bordo ha cambiato riga"
         finally:
@@ -477,16 +472,14 @@ def test_ctrl_x_chmod():
             session.close()
 
 
-def test_ctrl_x_symlink():
+def test_ctrl_s_symlink():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         (root / "origin.txt").write_text("source")
         session = Session(root)
         try:
-            session.key(b"\x18s")
-            session.type("alias.txt")
-            session.key(ENTER)
-            target = root / "alias.txt"
+            session.key(b"\x13")
+            target = root / "origin.txt.lnk"
             assert target.is_symlink(), "link simbolico non creato"
             assert os.readlink(target) == str(root / "origin.txt"), "link deve essere assoluto"
             assert target.read_text() == "source"
@@ -496,9 +489,7 @@ def test_ctrl_x_symlink():
             relocated = relocated_dir / "moved-link.txt"
             relocated.symlink_to(os.readlink(target))
             assert relocated.read_text() == "source", "link assoluto rotto dopo spostamento"
-            session.key(b"\x18s")
-            session.type("alias.txt")
-            session.key(ENTER)
+            session.key(b"\x13")
             assert target.is_symlink(), "link esistente sovrascritto"
         finally:
             session.close()
@@ -586,8 +577,131 @@ def test_chown_dialog_group_tab_navigation():
 
 
 
+
+def test_f2_rename_and_no_overwrite():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "a.txt").write_text("originale")
+        (root / "b.txt").write_text("esistente")
+        session = Session(root)
+        try:
+            session.key(F2)
+            session.type("b.txt")
+            session.key(ENTER)
+            assert (root / "a.txt").read_text() == "originale"
+            assert (root / "b.txt").read_text() == "esistente"
+            session.key(F2)
+            session.type("nuovo nome.txt")
+            session.key(ENTER)
+            assert not (root / "a.txt").exists()
+            assert (root / "nuovo nome.txt").read_text() == "originale"
+        finally:
+            session.close()
+
+
+def test_f4_editor_interactive():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        target = root / "a file.txt"
+        target.write_text("prima")
+        editor = root / "editor"
+        editor.write_text('#!/bin/sh\nprintf "Editor: "\nread value\nprintf "%s" "$value" > "$1"\n')
+        editor.chmod(0o755)
+        session = Session(root, env={"EDITOR": str(editor)})
+        try:
+            session.key(F4)
+            assert b"Editor:" in session.output
+            session.type("modificato")
+            session.key(ENTER)
+            assert target.read_text() == "modificato"
+            session.key(F7)
+            session.type("dopo-editor")
+            session.key(ENTER)
+            assert (root / "dopo-editor").is_dir()
+        finally:
+            session.close()
+
+
+def test_move_no_overwrite_and_cancel():
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = fixture(pathlib.Path(tmp))
+        (dst / "alpha.txt").write_text("esistente")
+        session = Session(src)
+        try:
+            session.key(DOWN)
+            session.key(F6)
+            session.type(str(dst))
+            session.key(ENTER)
+            assert (src / "alpha.txt").read_text() == "alpha"
+            assert (dst / "alpha.txt").read_text() == "esistente"
+            session.key(F5)
+            session.key(b"\x1b")
+            session.drain(0.15)
+            assert not (dst / "tree").exists()
+        finally:
+            session.close()
+
+
+
+def test_editor_fallback_and_arguments():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        commands = root / "commands"
+        commands.mkdir()
+        nano = commands / "nano"
+        nano.write_text('#!/bin/sh\nif [ "$1" = "-w" ]; then shift; fi\nprintf "editato" > "$1"\n')
+        nano.chmod(0o755)
+        target = root / "a.txt"
+        for editor in ("", str(nano) + " -w"):
+            target.write_text("prima")
+            session = Session(root, env={"EDITOR": editor, "PATH": str(commands) + os.pathsep + os.environ["PATH"]})
+            try:
+                session.key(DOWN)  # salta la directory commands
+                session.key(F4)
+                assert target.read_text() == "editato"
+            finally:
+                session.close()
+
+
+def test_mouse_rename_directory_wide_bar():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "prima").mkdir()
+        (root / "prima" / "file").write_text("intatto")
+        session = Session(root, cols=120)
+        try:
+            session.mouse(0, 5, 25)  # F2 nella barra estesa
+            session.type("dopo")
+            session.key(ENTER)
+            assert not (root / "prima").exists()
+            assert (root / "dopo" / "file").read_text() == "intatto"
+        finally:
+            session.close()
+
+
+def test_move_multiple_relative_destination():
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = fixture(pathlib.Path(tmp))
+        session = Session(src)
+        try:
+            session.key(F3)  # tree
+            session.key(DOWN)
+            session.key(F3)  # alpha.txt
+            session.key(F6)
+            session.type("../dest")
+            session.key(ENTER)
+            assert (dst / "tree" / "deep.txt").read_text() == "profondo"
+            assert (dst / "alpha.txt").read_text() == "alpha"
+            assert not (src / "tree").exists()
+            assert not (src / "alpha.txt").exists()
+        finally:
+            session.close()
+
+
 if __name__ == "__main__":
-    tests = [test_copy_multiple, test_cut_move, test_mkdir_and_delete, test_no_overwrite,
+    tests = [test_editor_fallback_and_arguments, test_mouse_rename_directory_wide_bar,
+             test_move_multiple_relative_destination, test_f2_rename_and_no_overwrite, test_f4_editor_interactive,
+             test_move_no_overwrite_and_cancel, test_copy_multiple, test_cut_move, test_mkdir_and_delete, test_no_overwrite,
              test_filename_with_spaces, test_delete_cancelled, test_no_copy_into_self,
              test_mouse_double_click_opens_folder, test_mouse_button_mkdir,
              test_mouse_prompt_ignores_click, test_mouse_mark_copy,
@@ -597,7 +711,7 @@ if __name__ == "__main__":
              test_no_flicker_on_cursor_navigation,
              test_lynx_arrows_enter_and_back, test_millis_italian_decimal_comma,
              test_repeated_clicks_no_crash, test_execute_interactive_script,
-             test_ctrl_x_chmod, test_ctrl_x_symlink, test_ctrl_x_chown_nonprivileged,
+             test_ctrl_x_chmod, test_ctrl_s_symlink, test_ctrl_x_chown_nonprivileged,
              test_f10_quits_and_restores_terminal, test_chmod_dialog_toggle_and_cancel,
              test_chown_dialog_group_tab_navigation]
     for test in tests:

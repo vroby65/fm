@@ -50,7 +50,7 @@ ABFM_ASCII=1 fm
 
 ## Tema grigio e navigazione stile Lynx
 
-Il pannello usa uno **sfondo grigio grafite** (ANSI 256 colori), evitando l'azzurro intenso del tema precedente. La riga attiva e' in grigio chiaro con testo scuro. Restano i colori distintivi per directory, eseguibili, collegamenti simbolici, elementi marcati e la barra F3–F8.
+Il pannello usa uno **sfondo grigio grafite** (ANSI 256 colori), evitando l'azzurro intenso del tema precedente. La riga attiva e' in grigio chiaro con testo scuro. Restano i colori distintivi per directory, eseguibili, collegamenti simbolici, elementi marcati e la barra F2–F8.
 
 La navigazione prende ispirazione da Lynx:
 
@@ -58,7 +58,7 @@ La navigazione prende ispirazione da Lynx:
 - **Destra / Invio** (o `l`): entra nella directory evidenziata
 - **Sinistra / Backspace** (o `h`): torna alla directory superiore
 
-Mouse, doppio clic, rotella e funzioni F3–F8 rimangono attivi. Le directory continuano a mostrare il prefisso `/` e i file nascosti sono visibili per impostazione predefinita. Le opzioni `ABFM_NO_COLOR=1` (o `NO_COLOR`) e `ABFM_ASCII=1` permettono di disabilitare i colori e le cornici Unicode.
+Mouse, doppio clic, rotella e funzioni F2–F8 rimangono attivi. Le directory continuano a mostrare il prefisso `/` e i file nascosti sono visibili per impostazione predefinita. Le opzioni `ABFM_NO_COLOR=1` (o `NO_COLOR`) e `ABFM_ASCII=1` permettono di disabilitare i colori e le cornici Unicode.
 
 ### Correzione clic ripetuti e locale italiana
 
@@ -68,16 +68,17 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 
 | Tasto | Azione |
 | --- | --- |
+| **F2** | Rinomina il file o la cartella evidenziata (richiede il nuovo nome) |
 | **F3** / Spazio | Seleziona o deseleziona il file corrente (`*`) |
-| **F4** | Copia i file marcati, oppure la riga corrente, negli appunti interni |
-| **F5** | Taglia i file marcati, oppure la riga corrente, negli appunti interni |
-| **F6** | Incolla nella directory visualizzata |
+| **F4** | Edita il file evidenziato con `$EDITOR`, oppure `nano` se non impostato |
+| **F5** | Copia i file marcati, oppure la riga corrente, nella cartella richiesta |
+| **F6** | Sposta i file marcati, oppure la riga corrente, nella cartella richiesta |
 | **F7** | Crea directory (digitare il nome e premere Invio) |
 | **F8** | Elimina file e directory selezionati, dopo conferma (`s`) |
 | **F10** | Esce dal file manager e ripristina il terminale |
 | **Ctrl+X**, poi **C** | Apre la finestra `chmod` con caselle rwx e immissione ottale |
 | **Ctrl+X**, poi **O** | Apre la finestra `chown` con campi proprietario e gruppo |
-| **Ctrl+X**, poi **S** | `ln -s`: crea nella directory corrente un link simbolico al file/directory evidenziato |
+| **Ctrl+S** | Crea nella cartella corrente un link simbolico assoluto chiamato `<nome>.lnk` |
 | ↑ / ↓, `j` / `k` | Muovi il cursore |
 | PagSu / PagGiù, Home / End | Scorrimento veloce |
 | **Freccia destra** / Invio / `l` | Entra nella directory, oppure avvia un file eseguibile |
@@ -85,23 +86,25 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 | Mouse sinistro | Seleziona la riga; un doppio click apre una directory oppure esegue il file avviabile |
 | Click sull'indicatore di selezione (colonna 3) | Seleziona o deseleziona l'elemento; il bordo esterno non è cliccabile |
 | Rotella mouse | Scorre l'elenco |
-| Click sulla barra F3–F10 | Attiva la relativa funzione, anche nella barra compatta |
+| Click sulla barra F2–F10 | Attiva la relativa funzione, anche nella barra compatta |
 | `r` | Aggiorna |
 | `q` | Esci (alternativa a F10) |
 
-Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempio `/Documenti`), secondo la convenzione visiva di MC. I file e le directory **nascosti (`.nome`) sono visibili per impostazione predefinita**. Il simbolo `@` indica un collegamento simbolico. La riga `/..` permette di tornare al livello precedente. I segni di selezione vengono azzerati quando si cambia directory, ma gli appunti restano disponibili finché l'applicazione è aperta.
+Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempio `/Documenti`), secondo la convenzione visiva di MC. I file e le directory **nascosti (`.nome`) sono visibili per impostazione predefinita**. Il simbolo `@` indica un collegamento simbolico. La riga `/..` permette di tornare al livello precedente. I segni di selezione vengono azzerati quando si cambia directory. F5 e F6 chiedono una cartella di destinazione esistente, con percorso assoluto o relativo alla cartella corrente; Esc annulla.
 
 ## Esecuzione e gestione degli attributi
 
 Premendo **Invio** oppure **freccia destra** su un file regolare con permesso di esecuzione, `fm` lo avvia direttamente, senza usare `eval`. Il programma figlio riceve il terminale normale con **stdin, stdout e stderr**; alla sua uscita il file manager attende Invio prima di ripristinare la TUI. Non apre automaticamente file privi del bit eseguibile.
 
-Le scorciatoie **Ctrl+X, C/O/S** sono *sequenze*, non tre tasti tenuti contemporaneamente: premere `Ctrl+X`, rilasciare, quindi `c`, `o` oppure `s`.
+Le scorciatoie **Ctrl+X, C/O** sono *sequenze*, non tre tasti tenuti contemporaneamente: premere `Ctrl+X`, rilasciare, quindi `c` oppure `o`. **Ctrl+S** si preme direttamente.
 
 - **chmod** presenta una finestra ispirata a MC con nove caselle **r/w/x** (Utente, Gruppo, Altri) e anteprima dei permessi. Frecce per spostarsi, **Spazio** per cambiare una casella; si possono anche digitare direttamente tre o quattro cifre ottali (per esempio `755` o `0644`). **Invio applica, Esc annulla**. Non è ricorsivo e salta i link simbolici.
 - **chown** presenta una finestra con campi **Proprietario** e **Gruppo**, selezionabili con **Tab** o le frecce. Si può anche digitare direttamente `utente:gruppo` nel primo campo. **Invio applica, Esc annulla**. Non è ricorsivo e non usa `sudo`: le modifiche senza privilegi adeguati falliscono in modo controllato.
-- **Link simbolico** richiede il nome del nuovo link, creato nella cartella attuale con **destinazione assoluta** (per esempio `/home/user/Documenti/file.txt`). Spostare il link in un'altra directory **non ne altera la destinazione**; spostare o cancellare il file originale può comunque romperlo. Non sovrascrive link o file preesistenti.
+- **Link simbolico** aggiunge `.lnk` al nome completo dell’elemento evidenziato (per esempio `file.txt.lnk`), nella cartella attuale, con **destinazione assoluta** (per esempio `/home/user/Documenti/file.txt`). Spostare il link in un'altra directory **non ne altera la destinazione**; spostare o cancellare il file originale può comunque romperlo. Non sovrascrive link o file preesistenti.
 
 Le operazioni `chmod` e `chown` si applicano ai file marcati con F3, oppure alla riga corrente se non ci sono marcature. La creazione del link utilizza sempre e soltanto la riga corrente.
+
+F4 passa il terminale all’editor e ripristina la TUI alla sua chiusura. `EDITOR` può contenere il comando e argomenti separati da spazi (per esempio `EDITOR="nano -w"`); non viene interpretato come codice shell. Per usare l’editor serve che sia installato.
 
 ## Ridisegno senza sfarfallio
 
@@ -109,14 +112,13 @@ I movimenti del cursore aggiornano soltanto la riga precedente e quella corrente
 
 ## Sicurezza e limiti della versione iniziale
 
-- **Non sovrascrive**: quando il nome di destinazione esiste già, F6 lascia invariato l'elemento e lo segnala come non riuscito.
+- **Non sovrascrive**: quando il nome di destinazione esiste già, F2, F5 e F6 lasciano invariato l'elemento e lo segnalano come non riuscito.
 - F8 esegue una **cancellazione ricorsiva permanente** (`rm -rf`) dopo una conferma esplicita: **non** usa il cestino.
-- La copia mantiene i metadati e i link simbolici usando `cp -a` (GNU coreutils). Taglia usa `mv`.
+- La copia mantiene i metadati e i link simbolici usando `cp -a` (GNU coreutils). Sposta e rinomina usano `mv`.
 - Non si possono copiare directory dentro sé stesse.
-- Gli appunti sono interni al programma, **non** agli appunti di sistema/desktop.
 - Le directory sono ordinate secondo la locale della shell; il testo è troncato se troppo lungo. Il calcolo della larghezza usa il numero di caratteri Bash, e per caratteri Unicode a doppia larghezza l'allineamento del bordo può risultare imperfetto.
 - Invio esegue direttamente i file con permesso di esecuzione; gli altri file normali non vengono aperti.
-- Le sequenze dei tasti funzione sono quelle comuni dei terminali xterm e Linux; alcuni terminali grafici possono intercettare F3–F8 e richiedere la riconfigurazione delle scorciatoie.
+- Le sequenze dei tasti funzione sono quelle comuni dei terminali xterm e Linux; alcuni terminali grafici possono intercettare F2–F8 e richiedere la riconfigurazione delle scorciatoie.
 
 ## Integrazione con ai-bar
 
@@ -131,7 +133,7 @@ bash -n fm
 python3 tests/smoke.py
 ```
 
-I test usano uno pseudo-terminale e directory temporanee per controllare selezione multipla/copia, taglia, creazione, cancellazione, mancata sovrascrittura, eventi mouse, doppio click, rotella, pulsanti F3–F8 e interazione durante i prompt.
+I test usano uno pseudo-terminale e directory temporanee per controllare rinomina, editor interattivo, selezione multipla/copia, spostamento, creazione, link `.lnk`, cancellazione, mancata sovrascrittura, eventi mouse, doppio click, rotella, pulsanti F2–F8 e interazione durante i prompt.
 
 ## Licenza
 
