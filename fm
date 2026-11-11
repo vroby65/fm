@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# ai-bar-fm: file manager a pannello singolo, senza librerie TUI esterne.
+# fm: file manager a pannello singolo, senza librerie TUI esterne.
 # Richiede Bash >= 4 (array associativi), stty e i comandi GNU di base.
 set -u
 
 usage() {
     cat <<'HELP'
-Uso: ai-bar-fm [DIRECTORY]
+Uso: fm [DIRECTORY]
 
 File manager TUI a pannello singolo (Bash, senza ncurses).
 
@@ -44,15 +44,15 @@ if (( $# > 1 )); then
     exit 2
 fi
 if [[ ! -t 0 || ! -t 1 || ! -r /dev/tty ]]; then
-    printf 'ai-bar-fm: eseguire in un terminale interattivo.\n' >&2
+    printf 'fm: eseguire in un terminale interattivo.\n' >&2
     exit 1
 fi
 if ! command -v stty >/dev/null 2>&1; then
-    printf 'ai-bar-fm: stty non disponibile.\n' >&2
+    printf 'fm: stty non disponibile.\n' >&2
     exit 1
 fi
 if ! cwd=$(cd -P -- "${1:-.}" 2>/dev/null && pwd -P); then
-    printf 'ai-bar-fm: directory non accessibile: %s\n' "${1:-.}" >&2
+    printf 'fm: directory non accessibile: %s\n' "${1:-.}" >&2
     exit 1
 fi
 
@@ -333,7 +333,7 @@ draw() {
         # Il bordo inferiore non emette CRLF, eliminando lo scroll terminale.
         printf '\033[H' >&9
         border top
-        line_text " ai-bar-fm  $cwd" "$CLR_TITLE"
+        line_text " fm  $cwd" "$CLR_TITLE"
         border mid
         for ((i=0; i<visible; i++)); do
             paint_entry "$((scroll+i))"
@@ -611,7 +611,7 @@ run_executable() {
     printf '\033[?1000l\033[?1006l\033[?25h%s' "$CLR_RESET" >&9
     (( alt_screen )) && printf '\033[?1049l' >&9
     stty "$original_tty" <&9 || return
-    printf '\r\nai-bar-fm: esecuzione di %s\r\n' "${path##*/}" >&9
+    printf '\r\nfm: esecuzione di %s\r\n' "${path##*/}" >&9
     # Invocazione diretta senza eval e senza interpolare il nome.
     (cd -- "$cwd" && "$path") <&9 >&9 2>&9
     status=$?

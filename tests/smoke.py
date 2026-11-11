@@ -12,7 +12,7 @@ import tempfile
 import termios
 import time
 
-SCRIPT = str(pathlib.Path(__file__).resolve().parents[1] / "ai-bar-fm")
+SCRIPT = str(pathlib.Path(__file__).resolve().parents[1] / "fm")
 F3 = b"\x1bOR"
 F4 = b"\x1bOS"
 F5 = b"\x1b[15~"

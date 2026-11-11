@@ -10,6 +10,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Syntax check
-        run: bash -n ai-bar-fm
+        run: bash -n fm
       - name: PTY smoke tests
         run: python3 tests/smoke.py

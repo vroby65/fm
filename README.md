@@ -1,4 +1,4 @@
-# ai-bar-fm
+# fm
 
 File manager **TUI a una sola lista**, ispirato ai tasti funzione di Midnight Commander e pensato per una piccola finestra terminale in **ai-bar**.
 
@@ -6,46 +6,46 @@ Il programma è scritto in **Bash 4+**, usa **mouse xterm/SGR**, il **tema grigi
 
 ## Installazione rapida (un solo comando)
 
-Per scaricare e installare `ai-bar-fm` nella directory utente `~/.local/bin`, senza `sudo`, senza compilare e senza clonare il repository, esegui:
+Per scaricare e installare `fm` nella directory utente `~/.local/bin`, senza `sudo`, senza compilare e senza clonare il repository, esegui:
 
 ```bash
-mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/ai-bar-fm/main/ai-bar-fm" -o "$HOME/.local/bin/ai-bar-fm" && chmod +x "$HOME/.local/bin/ai-bar-fm"
+mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/main/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
 ```
 
 Esegui subito il programma con:
 
 ```bash
-"$HOME/.local/bin/ai-bar-fm"
+"$HOME/.local/bin/fm"
 ```
 
-Ripetere il comando di installazione scarica la versione aggiornata da `main`. Per il download e' necessario `curl`; il file manager in esecuzione non richiede `curl` ne' librerie TUI. Se `~/.local/bin` e' gia' nel `PATH`, basta digitare `ai-bar-fm` (anche da Fish).
+Ripetere il comando di installazione scarica la versione aggiornata da `main`. Per il download e' necessario `curl`; il file manager in esecuzione non richiede `curl` ne' librerie TUI. Se `~/.local/bin` e' gia' nel `PATH`, basta digitare `fm` (anche da Fish).
 
 ## Avvio
 
 ```bash
-git clone https://github.com/vroby65/ai-bar-fm.git
-cd ai-bar-fm
-./ai-bar-fm
-./ai-bar-fm "$HOME/Documenti"
+git clone https://github.com/vroby65/fm.git
+cd fm
+./fm
+./fm "$HOME/Documenti"
 ```
 
 Per un'installazione personale, dopo aver ottenuto il sorgente:
 
 ```bash
-install -Dm755 ai-bar-fm "$HOME/.local/bin/ai-bar-fm"
+install -Dm755 fm "$HOME/.local/bin/fm"
 ```
 
 L'interfaccia richiede un terminale interattivo di almeno **35 colonne × 12 righe**; la larghezza consigliata è **70+ colonne**. Per un terminale integrato che gestisce già la propria schermata:
 
 ```bash
-ABFM_NO_ALT_SCREEN=1 ai-bar-fm
+ABFM_NO_ALT_SCREEN=1 fm
 ```
 
 Per utilizzare l’interfaccia senza colori o con cornici ASCII:
 
 ```bash
-ABFM_NO_COLOR=1 ai-bar-fm
-ABFM_ASCII=1 ai-bar-fm
+ABFM_NO_COLOR=1 fm
+ABFM_ASCII=1 fm
 ```
 
 ## Tema grigio e navigazione stile Lynx
@@ -93,7 +93,7 @@ Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempi
 
 ## Esecuzione e gestione degli attributi
 
-Premendo **Invio** oppure **freccia destra** su un file regolare con permesso di esecuzione, `ai-bar-fm` lo avvia direttamente, senza usare `eval`. Il programma figlio riceve il terminale normale con **stdin, stdout e stderr**; alla sua uscita il file manager attende Invio prima di ripristinare la TUI. Non apre automaticamente file privi del bit eseguibile.
+Premendo **Invio** oppure **freccia destra** su un file regolare con permesso di esecuzione, `fm` lo avvia direttamente, senza usare `eval`. Il programma figlio riceve il terminale normale con **stdin, stdout e stderr**; alla sua uscita il file manager attende Invio prima di ripristinare la TUI. Non apre automaticamente file privi del bit eseguibile.
 
 Le scorciatoie **Ctrl+X, C/O/S** sono *sequenze*, non tre tasti tenuti contemporaneamente: premere `Ctrl+X`, rilasciare, quindi `c`, `o` oppure `s`.
 
@@ -120,14 +120,14 @@ I movimenti del cursore aggiornano soltanto la riga precedente e quella corrente
 
 ## Integrazione con ai-bar
 
-Avviare `ai-bar-fm` all'interno di **un PTY** integrato o di un emulatore terminale che supporti le sequenze mouse **xterm SGR (1000/1006)**. Il programma usa `/dev/tty`, la modalità non canonica della tastiera, sequenze ANSI standard e (salvo l'opzione sopra) lo schermo alternativo. Non usa GUI e non necessita dell'ambiente desktop. Per la futura integrazione, si potrà aggiungere una modalità selezione che stampa il percorso scelto su stdout.
+Avviare `fm` all'interno di **un PTY** integrato o di un emulatore terminale che supporti le sequenze mouse **xterm SGR (1000/1006)**. Il programma usa `/dev/tty`, la modalità non canonica della tastiera, sequenze ANSI standard e (salvo l'opzione sopra) lo schermo alternativo. Non usa GUI e non necessita dell'ambiente desktop. Per la futura integrazione, si potrà aggiungere una modalità selezione che stampa il percorso scelto su stdout.
 
 ## Test
 
 Il funzionamento è verificabile con Python 3 (usato **solo per i test**, non per eseguire il file manager):
 
 ```bash
-bash -n ai-bar-fm
+bash -n fm
 python3 tests/smoke.py
 ```
 
