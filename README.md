@@ -79,6 +79,7 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 | **Ctrl+X**, poi **C** | Apre la finestra `chmod` con caselle rwx e immissione ottale |
 | **Ctrl+X**, poi **O** | Apre la finestra `chown` con campi proprietario e gruppo |
 | **Tab** | Passa al pannello opposto quando visibile |
+| **Ctrl+H** | Mostra o nasconde file e cartelle nascosti nel pannello attivo |
 | **Ctrl+F** | Filtra i nomi nel pannello attivo; testo vuoto per rimuovere il filtro |
 | **Ctrl+S** | Crea nella cartella corrente un link simbolico assoluto chiamato `<nome>.lnk` |
 | ↑ / ↓, `j` / `k` | Muovi il cursore |
@@ -92,15 +93,15 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 | `r` | Aggiorna |
 | `q` | Esci (alternativa a F10) |
 
-Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempio `/Documenti`), secondo la convenzione visiva di MC. I file e le directory **nascosti (`.nome`) sono visibili per impostazione predefinita**. Il simbolo `@` indica un collegamento simbolico. La riga `/..` permette di tornare al livello precedente. I segni di selezione vengono azzerati quando si cambia directory. Con un solo pannello, F5 e F6 chiedono una cartella di destinazione esistente, con percorso assoluto o relativo alla cartella corrente; Esc annulla. Se non ci sono marcature, operano sull’elemento evidenziato.
+Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempio `/Documenti`), secondo la convenzione visiva di MC. I file e le directory **nascosti (`.nome`) sono visibili per impostazione predefinita**; **Ctrl+H** ne alterna la visibilità nel pannello attivo. Il simbolo `@` indica un collegamento simbolico. La riga `/..` permette di tornare al livello precedente. I segni di selezione vengono azzerati quando si cambia directory. Con un solo pannello, F5 e F6 chiedono una cartella di destinazione esistente, con percorso assoluto o relativo alla cartella corrente; Esc annulla. Se non ci sono marcature, operano sull’elemento evidenziato.
 
 ## Due pannelli e filtro
 
-Da **100 colonne** in su compaiono automaticamente due pannelli affiancati, inizialmente nella stessa cartella. **Tab** o un clic nell’elenco cambia il lato attivo, indicato da `*` nel titolo. Ogni lato conserva cartella, cursore, scorrimento, selezione e filtro. Riducendo la finestra rimane visibile il pannello attivo; allargando ricompaiono entrambi con il loro stato.
+Da **100 colonne** in su compaiono automaticamente due pannelli affiancati, inizialmente nella stessa cartella. **Tab** o un clic nell’elenco cambia il lato attivo, indicato da `*` nel titolo. Ogni lato conserva cartella, cursore, scorrimento, selezione, filtro e visibilità dei nascosti. Riducendo la finestra rimane visibile il pannello attivo; allargando ricompaiono entrambi con il loro stato.
 
 Aprire la cartella di destinazione in un pannello, tornare con Tab al pannello sorgente, selezionare con **F3**, quindi premere **F5** per copiare o **F6** per spostare direttamente nell’altro pannello. Non serve un comando Incolla. Entrambi gli elenchi vengono aggiornati dopo l’operazione; le destinazioni esistenti non vengono sovrascritte.
 
-**Ctrl+F** chiede una parte del nome e **Invio** applica il filtro al solo pannello attivo, senza distinguere maiuscole e minuscole. Il testo è letterale, non un’espressione regolare o un glob. Il filtro comprende file e cartelle; `/..` resta sempre disponibile. Per rimuoverlo: Ctrl+F, testo vuoto, Invio. Esc annulla. Cambiare filtro azzera la selezione di quel pannello; il filtro resta attivo durante la navigazione.
+**Ctrl+F** chiede una parte del nome e **Invio** applica il filtro al solo pannello attivo, senza distinguere maiuscole e minuscole. Il testo è letterale, non un’espressione regolare o un glob. Il filtro comprende file e cartelle; `/..` resta sempre disponibile. Per rimuoverlo: Ctrl+F, testo vuoto, Invio. Esc annulla. Cambiare filtro o visibilità dei nascosti azzera la selezione di quel pannello; il filtro resta attivo durante la navigazione.
 
 ## Esecuzione e gestione degli attributi
 

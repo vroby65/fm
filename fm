@@ -25,6 +25,7 @@ File manager TUI a uno o due pannelli (Bash, senza ncurses).
  Ctrl+X poi O                     finestra proprietario/gruppo
  Ctrl+S                           crea link assoluto <nome>.lnk
  Ctrl+F                           filtro per nome (vuoto per rimuoverlo)
+ Ctrl+H                           mostra/nasconde file e cartelle nascosti
  Tab                              cambia pannello (da 100 colonne)
  Mouse click                      seleziona / doppio click apre
  Rotella mouse                    scorre l'elenco
@@ -78,8 +79,8 @@ last_click_ms=0
 last_click_path=''
 MOUSE_BTN=0; MOUSE_X=0; MOUSE_Y=0; MOUSE_ACTION=''
 PENDING_CHAR=''
-active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' resized=0
-declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '')
+active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' show_hidden=1 resized=0
+declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '') pane_hidden=(1 1)
 declare -A pane_marks=()
 # Coordinate di rendering: righe salvate per evitare redraw completi.
 needs_full=1
@@ -217,6 +218,7 @@ save_pane() {
     pane_cursors[active_pane]=$cursor
     pane_scrolls[active_pane]=$scroll
     pane_filters[active_pane]=$filter
+    pane_hidden[active_pane]=$show_hidden
     for key in "${!pane_marks[@]}"; do
         [[ $key == "$active_pane:"* ]] && unset 'pane_marks[$key]'
     done
@@ -229,6 +231,7 @@ load_pane() {
     local id=$1 key
     cwd=${pane_dirs[id]}; cursor=${pane_cursors[id]}
     scroll=${pane_scrolls[id]}; filter=${pane_filters[id]}
+    show_hidden=${pane_hidden[id]}
     reload
     for key in "${!pane_marks[@]}"; do
         [[ $key == "$id:"* ]] && marks["${key#*:}"]=1
@@ -276,6 +279,7 @@ reload() {
     entries=('..')
     for path in "$cwd"/*; do
         name=${path##*/}
+        if (( !show_hidden )) && [[ $name == .* ]]; then continue; fi
         [[ ${name,,} == *"${filter,,}"* ]] || continue
         [[ -d $path ]] && dirs+=("$path") || files+=("$path")
     done
@@ -373,7 +377,7 @@ paint_entry() {
 }
 
 draw_panel() {
-    local drawing_pane=$1 cwd cursor scroll filter pane_x pane_width inner needs_full
+    local drawing_pane=$1 cwd cursor scroll filter show_hidden pane_x pane_width inner needs_full
     local -a entries=()
     local -A marks=()
     local i title
@@ -521,7 +525,8 @@ input_key() {
             esac
             ;;
         ''|$'\r'|$'\n') KEY='ENTER';;
-        $'\177'|$'\b') KEY='BACK';;
+        $'\177') KEY='BACK';;
+        $'\b') KEY='HIDDEN';;
         ' ') KEY='F3';;
         $'\023') KEY='SYMLINK';;
         $'\006') KEY='FILTER';;
@@ -1114,6 +1119,13 @@ perform_key() {
         LEFT|h|BACK) cwd=$(cd -P -- "$cwd/.." && pwd -P); cursor=1; scroll=0; reload;;
         TAB) switch_pane;;
         FILTER) filter_items;;
+        HIDDEN)
+            show_hidden=$((1-show_hidden))
+            cursor=1; scroll=0
+            reload
+            if (( show_hidden )); then notice='File nascosti visibili.'
+            else notice='File nascosti non visibili.'; fi
+            ;;
         F2) rename_item;;
         F3) select_current;;
         F4) edit_item;;

@@ -838,8 +838,63 @@ def test_dual_no_overwrite_and_literal_filter():
             session.close()
 
 
+
+def test_ctrl_h_hidden_files_and_filter():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / ".hidden.txt").write_text("segreto")
+        (root / ".hidden-dir").mkdir()
+        (root / "visible.txt").write_text("visibile")
+        session = Session(root)
+        try:
+            start = len(session.output)
+            session.key(b"\x08")
+            screen = session.output[start:]
+            assert b".hidden.txt" not in screen
+            assert b".hidden-dir" not in screen
+            assert b"visible.txt" in screen
+            session.key(b"\x06")
+            session.type("hidden")
+            start = len(session.output)
+            session.key(ENTER)
+            assert b".hidden.txt" not in session.output[start:]
+            start = len(session.output)
+            session.key(b"\x08")
+            assert b".hidden.txt" in session.output[start:]
+            assert b"/.hidden-dir" in session.output[start:]
+            assert b"visible.txt" not in session.output[start:]
+        finally:
+            session.close()
+
+
+def test_ctrl_h_independent_panes_and_resize():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / ".secret").write_text("segreto")
+        session = Session(root, cols=120)
+        try:
+            session.key(b"\x08")  # nascosti a sinistra
+            session.key(b"\t")
+            session.resize(80)
+            start = len(session.output)
+            session.key(b"r")
+            assert b".secret" in session.output[start:]
+            session.resize(120)
+            session.key(b"\t")  # torna a sinistra
+            session.resize(80)
+            start = len(session.output)
+            session.key(b"r")
+            assert b".secret" not in session.output[start:]
+            start = len(session.output)
+            session.key(b"\x08")
+            assert b".secret" in session.output[start:]
+        finally:
+            session.close()
+
+
 if __name__ == "__main__":
-    tests = [test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
+    tests = [test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
+             test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
              test_dual_filter_and_mouse_focus, test_editor_fallback_and_arguments, test_mouse_rename_directory_wide_bar,
              test_move_multiple_relative_destination, test_f2_rename_and_no_overwrite, test_f4_editor_interactive,
