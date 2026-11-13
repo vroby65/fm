@@ -468,6 +468,7 @@ def test_remote_connection_dialog_password_hidden_and_cancel():
             session.key(DOWN)
             session.key(ENTER)
             assert b"Connessione SSH" in session.output
+            assert b"portachiavi" in session.output
             session.type("user@example.invalid")
             session.key(b"\t")
             session.type("password-segreta")

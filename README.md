@@ -115,13 +115,13 @@ Alla radice `/`, **Sinistra**, Backspace o l’apertura di `/..` portano al menu
 - **SSH** apre una connessione **SFTP su SSH**.
 - **FTP** apre una connessione FTP.
 
-Invio, Destra o doppio clic aprono la voce. Per SSH/FTP una finestra chiede **`utente@host`** (anche `utente@host:porta`) e **password**, visualizzata mascherata. Per SSH lasciare la password vuota per usare le chiavi configurate in OpenSSH o disponibili nell’agente. La prima verifica dell’identità SSH, se richiesta, mostra impronta e scelte nel terminale: la fiducia nell’host deve essere confermata dall’utente. Esc annulla la finestra; Ctrl+C interrompe una connessione in corso.
+Invio, Destra o doppio clic aprono la voce. Per SSH/FTP una finestra chiede **`utente@host`** (anche `utente@host:porta`) e **password**, visualizzata mascherata. Lasciare la password vuota per riutilizzare quella salvata nel portachiavi; per SSH sono disponibili anche le chiavi configurate in OpenSSH o nell’agente. La prima verifica dell’identità SSH, se richiesta, mostra impronta e scelte nel terminale: la fiducia nell’host deve essere confermata dall’utente. Esc annulla la finestra; Ctrl+C interrompe una connessione in corso.
 
 Dopo un collegamento riuscito la connessione compare sotto queste tre voci, anche ai successivi avvii. **F2** ne modifica il nome; **F8** la elimina dall’elenco dopo conferma. L’eliminazione riguarda solo la voce salvata e non disconnette il mount né cancella file remoti. Questo PC, SSH e FTP rimangono sempre disponibili. Invio, Destra o doppio clic su una connessione salvata riaprono il dialog con l’indirizzo compilato e la password vuota. Riconnettersi allo stesso indirizzo non crea duplicati e conserva il nome scelto.
 
 Le connessioni salvate contengono soltanto protocollo, indirizzo e nome, in `${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections/`, con permessi 0600. Gli ultimi indirizzi della versione precedente vengono importati una volta; le voci eliminate non vengono ricreate automaticamente.
 
-Dopo un collegamento riuscito viene ricordato l’ultimo indirizzo per protocollo nei file `${XDG_CONFIG_HOME:-$HOME/.config}/fm/last-ssh` e `last-ftp`, con permessi 0600. **La password non viene scritta nei file di fm, negli argomenti dei processi o nelle variabili d’ambiente**: passa tramite un descrittore anonimo e GIO usa esplicitamente [PasswordSave.NEVER](https://docs.gtk.org/gio/property.MountOperation.password-save.html). Aprendo nuovamente il dialog, l’indirizzo è già compilato e la password è vuota.
+Dopo un collegamento riuscito viene ricordato l’ultimo indirizzo per protocollo nei file `${XDG_CONFIG_HOME:-$HOME/.config}/fm/last-ssh` e `last-ftp`, con permessi 0600. **La password non viene scritta nei file di fm, negli argomenti dei processi o nelle variabili d’ambiente**: passa tramite un descrittore anonimo e GVfs la conserva nel **portachiavi di sistema**, usando [PasswordSave.PERMANENTLY](https://docs.gtk.org/gio/enum.PasswordSave.html). Aprendo nuovamente il dialog, l’indirizzo è già compilato e la password è vuota. Il campo vuoto non mostra il segreto: GVfs lo recupera dal portachiavi durante la connessione. Il portachiavi deve essere disponibile e sbloccato; può chiedere lo sblocco con il suo dialog. Se non è disponibile, la connessione con password digitata resta possibile ma fm non crea copie in chiaro. Per gestire o eliminare le credenziali usare Password e chiavi (Seahorse); F8 elimina soltanto la voce dall’elenco di fm.
 
 Le cartelle remote si navigano come quelle locali; dalla radice remota Sinistra torna a Connessioni. I pannelli possono mostrare contemporaneamente cartelle locali e remote, con selezione, F5/F6 e gli altri comandi sui file. Su FTP la copia trasferisce i contenuti senza richiedere la conservazione di attributi Unix; uno spostamento tra mount diversi elimina l’origine soltanto dopo una copia riuscita. Valgono i permessi dell’utente remoto: un rifiuto del server non richiede sudo locale. Le connessioni sono mount della sessione GVfs, condivisibili con le altre applicazioni, e possono rimanere attive dopo l’uscita da fm.
 
@@ -179,11 +179,13 @@ python3 tests/smoke.py
 
 I test usano uno pseudo-terminale e directory temporanee per controllare filtro, pannelli indipendenti, Tab, ridimensionamento, rinomina, editor interattivo, selezione multipla/copia, spostamento, creazione, link `.lnk`, cancellazione, mancata sovrascrittura, eventi mouse, doppio click, rotella, pulsanti F2–F8 e interazione durante i prompt.
 
-Le prove reali dei protocolli sono separate e facoltative: `tests/remote_integration.py` richiede anche `paramiko`, `pyftpdlib`, `dbus-run-session` e OpenSSH client. Avvia server su loopback con chiavi e directory temporanee, un bus D-Bus separato e un portachiavi disabilitato per i test:
+Le prove reali dei protocolli sono separate e facoltative: `tests/remote_integration.py` richiede anche `paramiko`, `pyftpdlib`, `dbus-run-session` e OpenSSH client. Avvia server su loopback con chiavi e directory temporanee, un bus D-Bus separato e un portachiavi disabilitato per i test di base:
 
 ```bash
 /usr/bin/python3 tests/remote_integration.py
 ```
+
+Con `--keyring` la stessa prova avvia un portachiavi GNOME temporaneo e verifica salvataggio cifrato, riavvio del portachiavi e riconnessione SSH/FTP senza digitare la password. Richiede anche `gnome-keyring-daemon` e le introspezioni Python `Secret` (`gir1.2-secret-1`); nessuna credenziale o configurazione personale viene utilizzata.
 
 ## Licenza
 

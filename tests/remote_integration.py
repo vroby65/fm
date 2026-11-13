@@ -1,6 +1,7 @@
 """Integrazione FTP/SFTP reale su loopback, con bus D-Bus e credenziali temporanei.
 
 Opzionale: richiede paramiko, pyftpdlib e lo stack GIO/GVfs/FUSE installato.
+Con --keyring verifica anche salvataggio cifrato e riconnessione senza password.
 Non usa server, configurazioni SSH o portachiavi personali.
 """
 
@@ -163,6 +164,9 @@ if "--session" not in sys.argv:
         runtime.mkdir(mode=0o700)
         env = os.environ.copy()
         env.update(
+            HOME=tmp,
+            XDG_CONFIG_HOME=str(root / "config"),
+            XDG_CACHE_HOME=str(root / "cache"),
             XDG_RUNTIME_DIR=str(runtime),
             XDG_DATA_HOME=str(root / "data"),
             FM_REMOTE_TEST_ROOT=tmp,
@@ -175,7 +179,7 @@ if "--session" not in sys.argv:
             )
         try:
             subprocess.run(
-                ["dbus-run-session", "--", sys.executable, __file__, "--session"],
+                ["dbus-run-session", "--", sys.executable, __file__, "--session"] + sys.argv[1:],
                 env=env,
                 check=True,
                 timeout=150,
@@ -193,6 +197,48 @@ if "--session" not in sys.argv:
 root = pathlib.Path(os.environ["FM_REMOTE_TEST_ROOT"])
 config = root / "config"
 config.mkdir()
+keyring = None
+
+
+def start_keyring():
+    # Il bus e i percorsi XDG sono tutti privati: mai collegarsi al daemon reale.
+    import gi
+    gi.require_version("Secret", "1")
+    from gi.repository import Gio, GLib, Secret
+
+    process = subprocess.Popen(
+        ["gnome-keyring-daemon", "--foreground", "--components=secrets", "--unlock",
+         "--control-directory=" + str(root / "runtime" / "keyring")],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    process.stdin.write(b"fixture-keyring-password")
+    process.stdin.close()
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        owner = bus.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+            "NameHasOwner", GLib.Variant("(s)", ("org.freedesktop.secrets",)),
+            GLib.VariantType.new("(b)"), Gio.DBusCallFlags.NONE, 1000, None,
+        )
+        if owner.unpack()[0]:
+            service = Secret.Service.open_sync(
+                Secret.Service, "org.freedesktop.secrets", Secret.ServiceFlags.OPEN_SESSION, None
+            )
+            collection = Secret.Collection.for_alias_sync(
+                service, "default", Secret.CollectionFlags.NONE, None
+            )
+            if collection is not None and not collection.get_locked():
+                return process
+        time.sleep(0.05)
+    process.terminate()
+    process.wait(timeout=5)
+    raise AssertionError("Portachiavi temporaneo non disponibile")
+
+
+if "--keyring" in sys.argv:
+    keyring = start_keyring()
+
 os.environ["XDG_CONFIG_HOME"] = str(config)
 bin_dir = root / "bin"
 bin_dir.mkdir()
@@ -301,6 +347,32 @@ try:
             print("PASS listing/mkdir/download", protocol, kind, flush=True)
         finally:
             s.close()
+        if keyring is not None and kind == "password":
+            import gi
+            gi.require_version("Secret", "1")
+            from gi.repository import Secret
+
+            service = Secret.Service.open_sync(
+                Secret.Service, "org.freedesktop.secrets", Secret.ServiceFlags.OPEN_SESSION, None
+            )
+            collection = Secret.Collection.for_alias_sync(
+                service, "default", Secret.CollectionFlags.LOAD_ITEMS, None
+            )
+            assert collection is not None, "Nessun portachiavi persistente"
+            matching = [item for item in collection.get_items()
+                        if item.get_attributes().get("port") == str(port)]
+            assert len(matching) == 1, "Password non salvata nel portachiavi"
+            matching[0].load_secret_sync(None)
+            assert matching[0].get_secret().get_text() == "test-secret"
+            files = list((root / "data" / "keyrings").glob("*.keyring"))
+            assert files
+            assert all(b"test-secret" not in file.read_bytes() for file in files)
+            scheme = "sftp" if protocol == "ssh" else "ftp"
+            subprocess.run(["gio", "mount", "-u", f"{scheme}://fmtest@127.0.0.1:{port}/"], check=True)
+            keyring.terminate()
+            keyring.wait(timeout=5)
+            keyring = start_keyring()
+            print("PASS encrypted persistent password", protocol, flush=True)
         s = m["Session"](upload, cols=120, env={"XDG_CONFIG_HOME": str(config)})
         try:
             s.key(b"\t")
@@ -316,10 +388,15 @@ try:
             assert f"fmtest@127.0.0.1:{port}".encode() in s.output[-12000:]
             s.key(b"\t")
             start = len(s.output)
-            s.key(m["ENTER"])
+            s.key(m["ENTER"])  # password vuota: recupera dal portachiavi, se attivo
             deadline = time.monotonic() + 10
             while b"hello.txt" not in s.output[start:] and time.monotonic() < deadline:
                 s.drain(0.15)
+            if b"hello.txt" not in s.output[start:]:
+                print(bytes(s.output[-5000:]).decode(errors="replace"), flush=True)
+            assert b"hello.txt" in s.output[start:], "Riconnessione senza password fallita"
+            if keyring is not None and kind == "password":
+                print("PASS keyring reconnection without typing password", protocol, flush=True)
             s.key(b"\t")
             start = len(s.output)
             s.key(m["F5"])
@@ -360,6 +437,17 @@ try:
                 ["gio", "mount", "-u", f"{scheme}://fmtest@127.0.0.1:{port}/"],
                 check=True,
             )
+            if keyring is not None:
+                # Rimuove soltanto il segreto del server di prova prima del test negativo.
+                service = Secret.Service.open_sync(
+                    Secret.Service, "org.freedesktop.secrets", Secret.ServiceFlags.OPEN_SESSION, None
+                )
+                collection = Secret.Collection.for_alias_sync(
+                    service, "default", Secret.CollectionFlags.LOAD_ITEMS, None
+                )
+                for item in collection.get_items():
+                    if item.get_attributes().get("port") == str(port):
+                        item.delete_sync(None)
             s = m["Session"](pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
             try:
                 s.key(m["LEFT"])
@@ -379,6 +467,12 @@ try:
                 assert b"Connessione non riuscita:" in s.output
                 assert b"wrong-password" not in s.output
                 assert b"Autenticazione non riuscita" in s.output
+                if keyring is not None:
+                    collection = Secret.Collection.for_alias_sync(
+                        service, "default", Secret.CollectionFlags.LOAD_ITEMS, None
+                    )
+                    assert not [item for item in collection.get_items()
+                                if item.get_attributes().get("port") == str(port)], "Password errata salvata"
                 print("PASS authentication failure", protocol, flush=True)
             finally:
                 s.close()
@@ -392,7 +486,17 @@ try:
         assert "test-secret" not in file.read_text()
         assert "wrong-password" not in file.read_text()
         assert file.stat().st_mode & 0o777 == 0o600
+    if keyring is not None:
+        files = list((root / "data" / "keyrings").glob("*.keyring"))
+        assert files, "Nessun portachiavi salvato su disco"
+        for file in files:
+            assert b"test-secret" not in file.read_bytes(), "Password non cifrata"
+            assert b"fixture-keyring-password" not in file.read_bytes()
+        print("PASS keyring encryption on disk", flush=True)
 finally:
+    if keyring is not None:
+        keyring.terminate()
+        keyring.wait(timeout=5)
     ftp.close_all()
     for sock in stops:
         sock.close()

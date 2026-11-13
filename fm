@@ -1526,10 +1526,11 @@ connection_dialog() {
         (( ${#value}>width )) && value=${value: -width}
         modal_text 5 4 "$width" "$value" "$style"
         if [[ $protocol == ssh ]]; then
-            modal_line 7 'Password vuota: usa le chiavi SSH.'
+            modal_line 7 'Vuota: portachiavi o chiavi SSH.'
         else
-            modal_line 7 'La password viene usata solo per questa connessione.'
+            modal_line 7 'Vuota: usa la password salvata nel portachiavi.'
         fi
+        (( modal_h >= 14 )) && modal_line 8 'Password ricordata nel portachiavi di sistema.'
         (( modal_h >= 14 )) && modal_line 9 'Tab: cambia campo  Invio: connetti  Esc: annulla'
         modal_rule "$((modal_h-4))"
         modal_buttons "$((focus-2))" 'Connetti'
@@ -1587,6 +1588,7 @@ remote_mount() {
 import os
 import pathlib
 import sys
+import time
 from urllib.parse import quote, urlsplit
 
 protocol, address, password_fd, result_file = sys.argv[1:]
@@ -1618,7 +1620,7 @@ except (ValueError, GLib.Error):
     sys.exit(1)
 
 operation = Gio.MountOperation()
-operation.set_password_save(Gio.PasswordSave.NEVER)
+operation.set_password_save(Gio.PasswordSave.PERMANENTLY)
 loop = GLib.MainLoop()
 cancellable = Gio.Cancellable()
 status = 1
@@ -1636,7 +1638,7 @@ def ask_password(op, message, default_user, default_domain, flags):
     op.set_username(user)
     op.set_domain(default_domain or "")
     op.set_password(password)
-    op.set_password_save(Gio.PasswordSave.NEVER)
+    op.set_password_save(Gio.PasswordSave.PERMANENTLY)
     op.reply(Gio.MountOperationResult.HANDLED)
 
 def ask_question(op, message, choices):
@@ -1662,7 +1664,12 @@ def mounted(file, result):
         except GLib.Error as error:
             if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.ALREADY_MOUNTED):
                 raise
-        root = file.find_enclosing_mount(None).get_root().get_path()
+        # L'autenticazione dal portachiavi puo' finire prima dell'esportazione FUSE.
+        for _ in range(40):
+            root = file.find_enclosing_mount(None).get_root().get_path()
+            if root and os.path.isdir(root):
+                break
+            time.sleep(0.05)
         if not root or not os.path.isdir(root):
             raise RuntimeError("Percorso remoto non disponibile: verifica gvfs-fuse.")
         pathlib.Path(result_file).write_text(root + "\n")
