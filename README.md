@@ -127,6 +127,16 @@ Le cartelle remote si navigano come quelle locali; dalla radice remota Sinistra 
 
 Il supporto remoto opzionale richiede **`/usr/bin/python3`, `python3-gi`, `gvfs-backends`, `gvfs-fuse`**, FUSE e un bus D-Bus utente attivo. Su questo PC sono già disponibili. Il filesystem locale continua a funzionare senza queste dipendenze.
 
+## Archivi e link simbolici
+
+**Invio**, **Destra** o doppio clic su un archivio aprono i contenuti come una cartella. Sono riconosciuti ZIP, TAR (anche GZ, BZ2, XZ e ZST), TGZ, TBZ/TBZ2, TXZ, TZST, 7Z e RAR; la lettura dei singoli formati dipende da libarchive/GVfs installati. Alcuni 7Z/RAR richiedono operazioni di seek non disponibili nel backend e vengono segnalati come non supportati. Il percorso usa `archivio.zip!/cartella`. Dalla radice dell’archivio, **Sinistra**, Backspace o `..` tornano alla cartella di provenienza evidenziando l’archivio.
+
+**F3/Spazio** selezionano e **F5** copia file o cartelle all’esterno, anche nel pannello opposto. La navigazione è in sola lettura: rinomina, editor, spostamento, cancellazione, creazione, attributi e menu comandi sono disabilitati dentro l’archivio; non è possibile copiarvi nuovi file. L’originale rimane invariato. Per modificare i contenuti, copiarli prima in una cartella normale.
+
+Si possono aprire anche archivi annidati e presenti nei pannelli remoti: viene copiato in una directory temporanea privata solo il file compresso da aprire, senza estrarne tutto il contenuto. Le copie temporanee vengono smontate e rimosse alla chiusura di fm. I link contenuti negli archivi possono essere seguiti solo se restano al loro interno. Archivi danneggiati o non supportati mostrano un errore; non è previsto l’inserimento di password per archivi cifrati. Il supporto richiede il backend `gvfsd-archive`, incluso in `gvfs-backends`, oltre allo stack GIO/FUSE già usato per FTP e SSH.
+
+Quando la riga evidenziata è un **link simbolico**, la barra in basso mostra **`Link -> destinazione`**, anche per i link interrotti. La destinazione è quella memorizzata nel collegamento, relativa o assoluta; selezionando un’altra voce ritorna l’aiuto di navigazione. I messaggi delle operazioni restano nella riga sottostante.
+
 ## Menu comandi su F1
 
 **F1** apre il menu personale di MC da `${XDG_CONFIG_HOME:-$HOME/.config}/mc/menu`, oppure quello di sistema `/etc/mc/mc.menu`. Le voci e le loro personalizzazioni sono lette a ogni apertura: sono disponibili anche installazione `.deb`, touch e ZIP se presenti nel proprio menu. I programmi richiesti dalle singole voci devono essere installati.
@@ -186,6 +196,14 @@ Le prove reali dei protocolli sono separate e facoltative: `tests/remote_integra
 ```
 
 Con `--keyring` la stessa prova avvia un portachiavi GNOME temporaneo e verifica salvataggio cifrato, riavvio del portachiavi e riconnessione SSH/FTP senza digitare la password. Richiede anche `gnome-keyring-daemon` e le introspezioni Python `Secret` (`gir1.2-secret-1`); nessuna credenziale o configurazione personale viene utilizzata.
+
+La verifica facoltativa degli archivi è separata dalla suite PTY e usa GVfs/FUSE su un bus e percorsi temporanei:
+
+```bash
+/usr/bin/python3 tests/archive_integration.py
+```
+
+Verifica ZIP, TAR/GZ/BZ2/XZ, archivi annidati, copia, ritorno e selezione, due pannelli, sola lettura e archivi danneggiati. Con `7z` installato verifica anche la lettura del formato o la segnalazione del limite di seek del backend.
 
 ## Licenza
 

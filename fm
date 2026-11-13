@@ -87,12 +87,13 @@ declare -A pane_marks=() directory_focus=() directory_scroll=() directory_marks=
 connections_root='@connections'
 connections_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections
 declare -A connection_names=() connection_protocols=() connection_addresses=()
-declare -A remote_labels=() remote_protocols=()
+declare -A remote_labels=() remote_protocols=() archive_sources=() archive_cache=()
+archive_pending_cache=''
 declare -a selection_sources=('' '')
 # Coordinate di rendering: righe salvate per evitare redraw completi.
 needs_full=1
 painted_rows=0 painted_cols=0 painted_scroll=-1 painted_cursor=-1
-painted_notice=''
+painted_notice='' painted_status=''
 USE_COLOR=1; USE_UNICODE=1
 CLR_RESET='' CLR_BORDER='' CLR_HEADER='' CLR_TITLE='' CLR_STATUS='' CLR_NOTICE='' CLR_CURSOR=''
 CLR_PANEL='' CLR_DIR='' CLR_EXEC='' CLR_LINK='' CLR_BADLINK=''
@@ -135,6 +136,13 @@ init_theme() {
 }
 cleanup() {
     trap - EXIT INT TERM HUP WINCH
+    local archive_root
+    [[ -n $archive_pending_cache ]] && rm -rf -- "$archive_pending_cache"
+    for archive_root in "${!archive_cache[@]}"; do
+        if gio mount -u "$archive_root" >/dev/null 2>&1; then
+            rm -rf -- "${archive_cache[$archive_root]}"
+        fi
+    done
     stty "$original_tty" <&9 2>/dev/null || :
     if (( mouse_enabled )); then
         printf '\033[?1000l\033[?1006l' >&9
@@ -464,6 +472,18 @@ draw_panel() {
     border bottom
 }
 
+selection_status() {
+    local path=${entries[cursor]} target
+    if [[ $cwd != "$connections_root" && -L $path ]] && target=$(readlink -- "$path"); then
+        safe "$target"
+        REPLY=" Link -> $REPLY"
+    elif (( dual_pane )); then
+        REPLY=' Tab: cambia lato | Ctrl+F: filtro | F5/F6: trasferisci nel pannello opposto'
+    else
+        REPLY=' Frecce: naviga | Ctrl+F: filtro | F10: esci'
+    fi
+}
+
 draw_dual() {
     local inner=$((cols-2))
     save_pane
@@ -471,7 +491,7 @@ draw_dual() {
     draw_panel 1
     printf '\033[%d;1H' "$actions_y" >&9
     render_actions
-    line_text ' Tab: cambia lato | Ctrl+F: filtro | F5/F6: trasferisci nel pannello opposto' "$CLR_STATUS"
+    line_text "$status_text" "$CLR_STATUS"
     line_text " $notice" "$CLR_NOTICE"
     border bottom
 }
@@ -483,7 +503,7 @@ draw_notice() {
 }
 
 draw() {
-    local i
+    local i status_text
     size
     if (( rows < 12 || cols < 35 )); then
         printf '\033[H\033[2JTerminale troppo piccolo (minimo 35x12).\r\n' >&9
@@ -495,6 +515,7 @@ draw() {
     items_y=4
     actions_y=$((visible+5))
     notice_y=$((visible+7))
+    selection_status; status_text=$REPLY
 
     if (( needs_full || rows != painted_rows || cols != painted_cols || scroll != painted_scroll )); then
         # Riscrive alle posizioni fisse senza pulire tutto lo schermo.
@@ -513,7 +534,7 @@ draw() {
             printf '\033[%d;1H' "$((visible+4))" >&9
             border mid
             render_actions
-            line_text ' Frecce: naviga | Ctrl+F: filtro | F10: esci' "$CLR_STATUS"
+            line_text "$status_text" "$CLR_STATUS"
             line_text " $notice" "$CLR_NOTICE"
             border bottom
         fi
@@ -522,13 +543,17 @@ draw() {
         # In navigazione aggiorna solo la vecchia e la nuova riga.
         (( painted_cursor != cursor )) && paint_entry "$painted_cursor"
         paint_entry "$cursor"
+        if [[ $painted_status != "$status_text" ]]; then
+            printf '\033[%d;1H' "$((notice_y-1))" >&9
+            line_text "$status_text" "$CLR_STATUS"
+        fi
         if [[ $painted_notice != "$notice" ]]; then
             draw_notice
         fi
     fi
     painted_rows=$rows; painted_cols=$cols
     painted_scroll=$scroll; painted_cursor=$cursor
-    painted_notice=$notice
+    painted_notice=$notice; painted_status=$status_text
 }
 
 input_key() {
@@ -746,6 +771,14 @@ transfer_items() {
             return
         fi
     fi
+    if is_archive_path "$destination"; then
+        notice='Archivio di destinazione in sola lettura.'; return
+    fi
+    if [[ $mode == move ]]; then
+        for src in "${targets[@]}"; do
+            if is_archive_path "$src"; then notice='Archivio in sola lettura: usa F5 per copiare i contenuti.'; return; fi
+        done
+    fi
     if is_remote_path "${targets[0]}"; then
         source_root=$REPLY
         [[ ${remote_protocols[$REPLY]} == ftp ]] && ftp_endpoint=1
@@ -901,6 +934,7 @@ file_command() {
     if [[ $error == *'Operation not permitted'* || $error == *'Permission denied'* ]]; then
         local argument
         for argument in "$@"; do
+            if is_archive_path "$argument"; then file_error='Archivio in sola lettura.'; return 1; fi
             if is_remote_path "$argument"; then file_error='Permessi negati sul server remoto.'; return 1; fi
         done
         trap ':' INT
@@ -1488,6 +1522,57 @@ create_symlink() {
 
 # Le connessioni GVfs espongono un percorso FUSE alle normali operazioni di fm.
 # REPLY riceve la radice del mount per distinguere protocollo e trasferimenti interni.
+is_archive_path() {
+    local root
+    for root in "${!archive_sources[@]}"; do
+        if [[ $1 == "$root" || $1 == "$root/"* ]]; then REPLY=$root; return 0; fi
+    done
+    return 1
+}
+
+is_archive_file() {
+    case ${1,,} in
+        *.zip|*.tar|*.tar.gz|*.tgz|*.tar.bz2|*.tbz|*.tbz2|*.tar.xz|*.txz|*.tar.zst|*.tzst|*.7z|*.rar) return 0;;
+        *) return 1;;
+    esac
+}
+
+open_archive() {
+    local path=$1 root result status message cache='' mount_path=$1 file_error=''
+    for root in "${!archive_sources[@]}"; do
+        if [[ ${archive_sources[$root]} == "$path" && -d $root ]]; then
+            change_directory "$root"; return
+        fi
+    done
+    # Il backend archive non puo' leggere direttamente i percorsi di altri mount GVfs.
+    if is_archive_path "$path" || is_remote_path "$path"; then
+        cache=$(mktemp -d "${TMPDIR:-/tmp}/fm-archive.XXXXXX") || return
+        archive_pending_cache=$cache
+        mount_path="$cache/${path##*/}"
+        if ! file_command cp -- "$path" "$mount_path"; then
+            rm -rf -- "$cache"
+            notice="Impossibile leggere il file archivio: $file_error"; return
+        fi
+    fi
+    result=$(mktemp) || { [[ -n $cache ]] && rm -rf -- "$cache"; return; }
+    local run_program_label="Apertura archivio ${path##*/}"
+    trap ':' INT
+    run_program 0 remote_mount archive "$mount_path" -1 "$result"
+    status=$?
+    trap 'exit 130' INT
+    IFS= read -r root < "$result" || :
+    rm -f -- "$result"
+    if (( status != 0 )); then
+        [[ -n $cache ]] && rm -rf -- "$cache"
+        safe "${root:-annullata}"; message=$REPLY
+        notice="Apertura archivio non riuscita: $message"; return
+    fi
+    archive_sources["$root"]=$path
+    [[ -n $cache ]] && archive_cache["$root"]=$cache
+    archive_pending_cache=''
+    change_directory "$root"
+}
+
 is_remote_path() {
     local root
     for root in "${!remote_labels[@]}"; do
@@ -1500,6 +1585,14 @@ display_path() {
     local root
     REPLY=$1
     if [[ $1 == "$connections_root" ]]; then REPLY='Connessioni'; return; fi
+    for root in "${!archive_sources[@]}"; do
+        if [[ $1 == "$root" || $1 == "$root/"* ]]; then
+            local suffix=${1#"$root"} source=${archive_sources[$root]}
+            display_path "$source"
+            REPLY+="!${suffix:-/}"
+            return
+        fi
+    done
     for root in "${!remote_labels[@]}"; do
         if [[ $1 == "$root" || $1 == "$root/"* ]]; then
             REPLY="${remote_labels[$root]}:${1#"$root"}"
@@ -1592,7 +1685,7 @@ import time
 from urllib.parse import quote, urlsplit
 
 protocol, address, password_fd, result_file = sys.argv[1:]
-password = os.fdopen(int(password_fd)).read()
+password = "" if protocol == "archive" else os.fdopen(int(password_fd)).read()
 
 def fail(message):
     pathlib.Path(result_file).write_text(message + "\n")
@@ -1601,20 +1694,24 @@ def fail(message):
 try:
     from gi.repository import Gio, GLib
 except ImportError:
-    fail("Supporto remoto assente: servono python3-gi, gvfs-backends e gvfs-fuse.")
+    fail("Supporto GVfs assente: servono python3-gi, gvfs-backends e gvfs-fuse.")
     sys.exit(1)
 
 try:
-    user, host = address.rsplit("@", 1)
-    if not user or any(c in user for c in ":/@?#") or any(c.isspace() for c in address):
-        raise ValueError()
-    scheme = "sftp" if protocol == "ssh" else "ftp"
-    parsed = urlsplit(f"{scheme}://{quote(user, safe='')}@{host}/")
-    if not parsed.hostname or parsed.hostname.startswith("-") or parsed.path != "/" or parsed.query or parsed.fragment:
-        raise ValueError()
-    if parsed.port is not None and not 1 <= parsed.port <= 65535:
-        raise ValueError()
-    location = Gio.File.new_for_uri(parsed.geturl())
+    if protocol == "archive":
+        uri = pathlib.Path(address).as_uri()
+        location = Gio.File.new_for_uri("archive://" + quote(uri, safe="") + "/")
+    else:
+        user, host = address.rsplit("@", 1)
+        if not user or any(c in user for c in ":/@?#") or any(c.isspace() for c in address):
+            raise ValueError()
+        scheme = "sftp" if protocol == "ssh" else "ftp"
+        parsed = urlsplit(f"{scheme}://{quote(user, safe='')}@{host}/")
+        if not parsed.hostname or parsed.hostname.startswith("-") or parsed.path != "/" or parsed.query or parsed.fragment:
+            raise ValueError()
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError()
+        location = Gio.File.new_for_uri(parsed.geturl())
 except (ValueError, GLib.Error):
     fail("Indirizzo non valido: usa utente@host[:porta].")
     sys.exit(1)
@@ -1629,6 +1726,10 @@ auth_error = ""
 
 def ask_password(op, message, default_user, default_domain, flags):
     global attempted, auth_error
+    if protocol == "archive":
+        auth_error = "Archivio protetto o non leggibile."
+        op.reply(Gio.MountOperationResult.ABORTED)
+        return
     if attempted or (protocol == "ssh" and not password):
         auth_error = "Autenticazione non riuscita." if attempted else "Chiave SSH non disponibile: inserisci la password."
         op.reply(Gio.MountOperationResult.ABORTED)
@@ -1664,6 +1765,9 @@ def mounted(file, result):
         except GLib.Error as error:
             if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.ALREADY_MOUNTED):
                 raise
+        if protocol == "archive":
+            # Il backend archive pubblica la radice con l'URI interno nuovamente quotato.
+            file = Gio.File.new_for_uri("archive://" + quote(quote(uri, safe=""), safe="") + "/")
         # L'autenticazione dal portachiavi puo' finire prima dell'esportazione FUSE.
         for _ in range(40):
             root = file.find_enclosing_mount(None).get_root().get_path()
@@ -1844,8 +1948,13 @@ change_directory() {
 go_parent() {
     local previous=$cwd i
     [[ $cwd == "$connections_root" ]] && return 0
-    if [[ $cwd == / || -v remote_labels["$cwd"] ]]; then change_directory "$connections_root"; return; fi
-    if ! change_directory "$cwd/.."; then return; fi
+    if [[ -v archive_sources["$cwd"] ]]; then
+        previous=${archive_sources[$cwd]}
+        if ! change_directory "${previous%/*}/"; then return; fi
+    else
+        if [[ $cwd == / || -v remote_labels["$cwd"] ]]; then change_directory "$connections_root"; return; fi
+        if ! change_directory "$cwd/.."; then return; fi
+    fi
     for i in "${!entries[@]}"; do
         if [[ ${entries[i]} == "$previous" ]]; then cursor=$i; break; fi
     done
@@ -1854,6 +1963,13 @@ go_parent() {
 
 enter_dir() {
     local path=${entries[cursor]}
+    if is_archive_path "$cwd" && [[ -L $path ]]; then
+        local archive_root=$REPLY resolved
+        if ! resolved=$(realpath -e -- "$path") ||
+           [[ $resolved != "$archive_root" && $resolved != "$archive_root/"* ]]; then
+            notice='Link esterno o non disponibile in questo archivio.'; return
+        fi
+    fi
     if [[ $cwd == "$connections_root" ]]; then
         case $path in
             local) change_directory /;;
@@ -1869,7 +1985,10 @@ enter_dir() {
         go_parent
     elif [[ -d $path ]]; then
         change_directory "$path"
+    elif [[ -f $path ]] && is_archive_file "$path"; then
+        open_archive "$path"
     elif [[ -f $path && -x $path ]]; then
+        if is_archive_path "$cwd"; then notice='Archivio in sola lettura.'; return; fi
         run_executable
     else
         notice="Non e' una directory o un file eseguibile."
@@ -1931,6 +2050,12 @@ handle_mouse() {
 }
 
 perform_key() {
+    if is_archive_path "$cwd"; then
+        case $1 in
+            F1|F2|F4|F6|F7|F8|ATTRIBUTES|SYMLINK)
+                notice='Archivio in sola lettura: usa F5 per copiare i contenuti.'; return 0;;
+        esac
+    fi
     if [[ $cwd == "$connections_root" ]]; then
         case $1 in
             F2) rename_saved_connection; return 0;;

@@ -582,6 +582,34 @@ def test_saved_connections_import_only_once():
             session.close()
 
 
+def test_selected_symlink_target_in_status_line():
+    for cols in (80, 120):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "target.txt").write_text("target")
+            (root / "link.txt").symlink_to("target.txt")
+            (root / "broken.txt").symlink_to("missing-target.txt")
+            session = Session(root, cols=cols)
+            try:
+                session.key(b"\x1b[H")
+                session.key(DOWN)  # broken.txt
+                assert b"Link -> missing-target.txt" in session.output[-5000:]
+                start = len(session.output)
+                session.key(DOWN)  # link.txt
+                assert b"Link -> target.txt" in session.output[start:]
+                start = len(session.output)
+                session.key(DOWN)  # file normale: ripristina l'aiuto
+                assert b"Link ->" not in session.output[start:]
+                assert b"Ctrl+F" in session.output[start:]
+                if cols == 120:
+                    session.key(b"\t")
+                    session.key(b"\x1b[H")
+                    session.key(DOWN)
+                    assert b"Link -> missing-target.txt" in session.output[-5000:]
+            finally:
+                session.close()
+
+
 def test_copy_multiple():
     with tempfile.TemporaryDirectory() as tmp:
         src, dst = fixture(pathlib.Path(tmp))
@@ -1825,7 +1853,7 @@ def test_filter_clears_on_directory_open_and_double_click():
 
 
 if __name__ == "__main__":
-    tests = [test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
+    tests = [test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
              test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
