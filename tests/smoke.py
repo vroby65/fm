@@ -14,6 +14,7 @@ import termios
 import time
 
 SCRIPT = str(pathlib.Path(__file__).resolve().parents[1] / "fm")
+F1 = b"\x1bOP"
 F2 = b"\x1bOQ"
 F3 = b"\x1bOR"
 F4 = b"\x1bOS"
@@ -81,7 +82,7 @@ class Session:
         self.drain(0.2)
 
     def close(self):
-        self.key(b"q")
+        self.key(F10)
         for _ in range(50):
             pid, status = os.waitpid(self.pid, os.WNOHANG)
             if pid:
@@ -106,6 +107,478 @@ def fixture(root: pathlib.Path):
     (source / "delete.txt").write_text("cancella")
     (source / "file space.txt").write_text("spazi")
     return source, dest
+
+
+def test_column_separators_continue_through_empty_rows():
+    import re
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "solo.txt").write_text("un file")
+        for cols, ascii_mode in ((96, False), (120, False), (80, True)):
+            session = Session(root, cols=cols, env={"ABFM_ASCII": str(int(ascii_mode))})
+            try:
+                for width in (cols, 121):
+                    if width != cols:
+                        session.output.clear()
+                        session.resize(width)
+                        session.key(b"\x1b")
+                        session.drain(.15)
+                    panes = [(1, width)] if width < 100 else [(1, width // 2), (width // 2 + 1, width - width // 2)]
+                    separator = "|" if ascii_mode else "│"
+                    for x, pane_width in panes:
+                        expected = separator + " " * (pane_width - 30) + separator + " " * 10 + separator + " " * 16 + separator
+                        for row in range(6, 24):
+                            match = re.search(rb"\x1b\[" + f"{row};{x}H".encode() + rb"([^\r\n]*)", bytes(session.output))
+                            assert match, (row, x)
+                            text = re.sub(rb"\x1b\[[0-9;]*m", b"", match[1]).decode()
+                            assert text == expected, (width, row, text)
+            finally:
+                session.close()
+
+
+def test_q_does_not_quit():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        session = Session(root)
+        try:
+            session.key(b"qQ")
+            session.key(F7)
+            session.type("ancora-aperto")
+            session.key(ENTER)
+            assert (root / "ancora-aperto").is_dir()
+            session.resize(30)
+            session.key(b"qQ")
+            session.resize(80)
+            session.key(F7)
+            session.type("dopo-resize")
+            session.key(ENTER)
+            assert (root / "dopo-resize").is_dir()
+        finally:
+            session.close()
+
+
+def test_f1_mc_menu_context_macros_and_prompt():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        work, config = root / "work", root / "config"
+        work.mkdir()
+        (config / "mc").mkdir(parents=True)
+        name = 'file "$(touch pwned)".txt'
+        (work / name).write_text("conserva")
+        (config / "mc" / "menu").write_text(r"""shell_patterns=0
++ f \.txt$ & ! t t
+a Comando file singolo
+    printf '%%s\n' %f > singolo
++ t t
+b Comando marcati
+    printf '%%s\n' %t > marcati
++ f \.deb$
+i Installa pacchetto
+    touch installato
+p Richiesta nome
+    value=%{Nome file}
+    printf '%%s\n' "$value" > richiesta
+v Visualizza risultato
+    %view{ascii} printf 'vista'
+""")
+        session = Session(work, env={"XDG_CONFIG_HOME": str(config), "PAGER": "cat"})
+        try:
+            session.key(F1)
+            assert b"Comando file singolo" in session.output
+            assert b"Comando marcati" not in session.output
+            assert b"Installa pacchetto" not in session.output
+            session.key(b"a")
+            assert (work / "singolo").read_text().strip() == name
+            assert not (work / "pwned").exists()
+            session.key(ENTER)
+            session.key(F1)
+            session.key(b"p")
+            session.type("nome con spazi")
+            session.key(ENTER)
+            assert (work / "richiesta").read_text().strip() == "nome con spazi"
+            session.key(ENTER)
+            session.key(F1)
+            start = len(session.output)
+            session.key(b"v")
+            assert b"vista" in session.output[start:]
+            session.key(F1)
+            session.key(b"\x1b")
+            session.drain(.2)
+            assert (work / name).read_text() == "conserva"
+        finally:
+            session.key(b"\x1b")
+            session.close()
+
+
+def test_f1_mc_menu_tagged_and_opposite_directory():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        work, config = root / "work", root / "config"
+        work.mkdir()
+        dest = root / "dest"
+        dest.mkdir()
+        (config / "mc").mkdir(parents=True)
+        for name in ("a file.txt", "b.txt"):
+            (work / name).write_text("demo")
+        (config / "mc" / "menu").write_text(r"""shell_patterns=1
++ t t
+s Selezione e percorsi
+    printf '%%s\n' %s > scelti
+    printf '%%s\n' %d %D > percorsi
+u Smarca selezione
+    printf '%%s\n' %u > smarcati
+""")
+        session = Session(work, cols=120, env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            session.key(F3)
+            session.key(DOWN)
+            session.key(F3)
+            session.key(b"\t")
+            session.key(LEFT)
+            session.key(b"\x06")
+            session.type("dest")
+            session.key(ENTER)
+            session.key(b"\t")
+            session.key(F1)
+            session.key(b"s")
+            assert (work / "scelti").read_text().splitlines() == ["a file.txt", "b.txt"]
+            assert (work / "percorsi").read_text().splitlines() == [str(work), str(dest)]
+            session.key(ENTER)
+            session.key(F1)
+            session.key(b"u")
+            assert (work / "smarcati").read_text().splitlines() == ["a file.txt", "b.txt"]
+            session.key(ENTER)
+        finally:
+            session.key(b"\x1b")
+            session.close()
+
+
+def test_f1_menu_mouse_scroll_and_resize():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        work, config = root / "work", root / "config"
+        work.mkdir()
+        (work / "input.txt").write_text("demo")
+        (config / "mc").mkdir(parents=True)
+        (config / "mc" / "menu").write_text("".join(
+            f"{chr(97+i)} Comando numero {i}\n    printf done > comando-{i}\n" for i in range(26)))
+        session = Session(work, env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            session.mouse(0, 4, 25)  # F1 nella barra
+            assert b"Menu comandi (MC)" in session.output
+            session.key(END)
+            assert b"Comando numero 25" in session.output
+            session.key(ENTER)
+            assert (work / "comando-25").read_text() == "done"
+            session.key(ENTER)
+            session.key(b"\x1b[11~")  # variante CSI di F1
+            session.resize(35)
+            session.key(b"\x1b[H")
+            session.key(DOWN)
+            session.mouse(0, 8, 24)  # Esegui nella finestra stretta
+            assert (work / "comando-1").read_text() == "done"
+            session.key(ENTER)
+        finally:
+            session.key(b"\x1b")
+            session.close()
+
+
+def test_directory_remembers_cursor_after_reentry():
+    for cols in (80, 120):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            child = root / "cartella"
+            child.mkdir()
+            for i in range(30):
+                (child / f"file-{i:02}.txt").write_text(str(i))
+            session = Session(child, cols=cols)
+            try:
+                session.key(END)
+                session.key(LEFT)
+                (child / "000-nuovo.txt").write_text("nuovo")
+                session.key(RIGHT)
+                session.key(F2)
+                session.type("ritrovato.txt")
+                session.key(ENTER)
+                assert (child / "ritrovato.txt").read_text() == "29"
+                assert (child / "file-00.txt").read_text() == "0"
+            finally:
+                session.close()
+
+
+def test_directory_remembers_marks_and_drops_missing_files():
+    for cols, remove in ((80, False), (120, False), (80, True)):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            child, dest, second = (root / name for name in ("cartella", "dest", "second"))
+            for path in (child, dest, second): path.mkdir()
+            for name in ("a.txt", "b.txt"): (child / name).write_text(name)
+            session = Session(child, cols=cols)
+            try:
+                session.key(F3)
+                session.key(DOWN)
+                session.key(F3)
+                session.key(LEFT)
+                if remove:
+                    (child / "b.txt").unlink()
+                    (child / "nuovo.txt").write_text("nuovo")
+                session.key(RIGHT)
+                if cols >= 100: session.resize(80)
+                session.key(F5)
+                session.type(str(dest))
+                session.key(ENTER)
+                assert (dest / "a.txt").read_text() == "a.txt"
+                assert (dest / "b.txt").exists() == (not remove)
+                assert not (dest / "nuovo.txt").exists()
+                # Una copia completata azzera i segni: non devono riapparire dal ricordo.
+                session.key(LEFT)
+                session.key(RIGHT)
+                session.key(F5)
+                session.type(str(second))
+                session.key(ENTER)
+                assert (second / "a.txt").exists()
+                assert not (second / "b.txt").exists()
+            finally:
+                session.close()
+
+
+def test_directory_memory_is_independent_between_panes():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        child, left_dest, right_dest = (root / name for name in ("cartella", "dest-left", "dest-right"))
+        for path in (child, left_dest, right_dest): path.mkdir()
+        for name in ("a.txt", "b.txt"): (child / name).write_text(name)
+        session = Session(child, cols=120)
+        try:
+            session.key(F3)  # a a sinistra
+            session.key(LEFT)
+            session.key(b"\t")
+            session.key(DOWN)
+            session.key(F3)  # b a destra
+            session.key(LEFT)
+            session.key(b"\t")
+            session.key(RIGHT)
+            session.resize(80)
+            session.key(F5)
+            session.type(str(left_dest))
+            session.key(ENTER)
+            assert (left_dest / "a.txt").exists()
+            assert not (left_dest / "b.txt").exists()
+            session.resize(120)
+            session.key(b"\t")
+            session.key(RIGHT)
+            session.resize(80)
+            session.key(F5)
+            session.type(str(right_dest))
+            session.key(ENTER)
+            assert (right_dest / "b.txt").exists()
+            assert not (right_dest / "a.txt").exists()
+        finally:
+            session.close()
+
+
+def test_single_pane_transfer_uses_marked_absolute_source():
+    for move in (False, True):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            source, dest = root / "A", root / "B"
+            source.mkdir(); dest.mkdir()
+            out = root / "out"
+            out.mkdir()
+            (source / "a-non-marcato.txt").write_text("altro")
+            (source / "scelto.txt").write_text("origine")
+            (dest / "altro.txt").write_text("destinazione")
+            session = Session(source, cols=80)
+            try:
+                session.key(END)
+                session.key(F3)
+                session.key(LEFT)
+                session.key(DOWN)
+                session.key(RIGHT)
+                session.key(F6 if move else F5)
+                session.key(ENTER)  # destinazione: cartella corrente B
+                assert (dest / "scelto.txt").read_text() == "origine"
+                assert (source / "scelto.txt").exists() == (not move)
+                assert (dest / "altro.txt").read_text() == "destinazione"
+                session.key(LEFT)
+                session.key(UP)
+                session.key(RIGHT)
+                session.key(b"\x1b[H")
+                session.key(DOWN)  # a-non-marcato.txt
+                session.key(F5)
+                session.type(str(out))
+                session.key(ENTER)
+                assert (out / "a-non-marcato.txt").read_text() == "altro"
+                assert not (out / "scelto.txt").exists(), "Marcatura consumata riapparsa"
+            finally:
+                session.key(b"\x1b")
+                session.close()
+
+
+def test_pending_transfer_does_not_fall_back_when_source_disappears():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        source, dest, out = (root / name for name in ("A", "B", "out"))
+        for path in (source, dest, out): path.mkdir()
+        file = source / "scelto.txt"
+        file.write_text("origine")
+        (dest / "altro.txt").write_text("destinazione")
+        session = Session(source)
+        try:
+            session.key(F3)
+            session.key(LEFT)
+            session.key(DOWN)
+            session.key(RIGHT)
+            file.unlink()
+            session.key(F5)
+            session.type(str(out))
+            session.key(ENTER)
+            assert not list(out.iterdir()), "Copiato il file della destinazione al posto della sorgente"
+            assert b"Origine non disponibile" in session.output
+        finally:
+            session.close()
+
+
+def test_connections_menu_above_root_and_local_return():
+    with tempfile.TemporaryDirectory() as tmp:
+        for cols in (80, 120):
+            session = Session(pathlib.Path("/"), cols=cols, env={"XDG_CONFIG_HOME": tmp})
+            try:
+                session.key(LEFT)
+                for label in (b"Questo PC", b"SSH", b"FTP"):
+                    assert label in session.output, label
+                start = len(session.output)
+                session.key(F2)
+                assert b"Nome attuale:" not in session.output[start:]
+                session.key(b"\x1b[H")
+                session.key(ENTER)
+                session.key(b"\x1b[H")
+                session.key(ENTER)  # /.. dalla root riapre Connessioni
+                assert b"Connessioni" in session.output[-12000:]
+            finally:
+                session.close()
+
+def test_remote_connection_dialog_password_hidden_and_cancel():
+    with tempfile.TemporaryDirectory() as tmp:
+        config = pathlib.Path(tmp) / "config"
+        session = Session(pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            session.key(LEFT)
+            session.key(DOWN)
+            session.key(ENTER)
+            assert b"Connessione SSH" in session.output
+            session.type("user@example.invalid")
+            session.key(b"\t")
+            session.type("password-segreta")
+            assert b"password-segreta" not in session.output
+            session.key(b"\x1b")
+            session.drain(.2)
+            assert not (config / "fm" / "last-ssh").exists()
+            session.key(DOWN)
+            session.key(ENTER)
+            assert b"Connessione FTP" in session.output
+            session.key(b"\x1b")
+            session.drain(.2)
+        finally:
+            session.key(b"\x1b")
+            session.close()
+
+
+def saved_connection_fixture(config, protocol="ssh", address="user@example.invalid", label="Server prova"):
+    import hashlib
+
+    identifier = hashlib.sha256(f"{protocol}\0{address}".encode()).hexdigest()
+    directory = config / "fm" / "connections"
+    directory.mkdir(parents=True, exist_ok=True)
+    file = directory / identifier
+    file.write_text(f"{protocol}\n{address}\n{label}\n")
+    file.chmod(0o600)
+    return file
+
+
+def test_saved_connections_rename_delete_and_restart():
+    with tempfile.TemporaryDirectory() as tmp:
+        config = pathlib.Path(tmp) / "config"
+        file = saved_connection_fixture(config)
+        session = Session(pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            session.key(LEFT)
+            assert b"Server prova" in session.output
+            session.key(END)
+            session.key(F2)
+            session.type("NAS di casa")
+            session.key(ENTER)
+            assert file.read_text().splitlines() == ["ssh", "user@example.invalid", "NAS di casa"]
+        finally:
+            session.close()
+        session = Session(pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            session.key(LEFT)
+            assert b"NAS di casa" in session.output
+            session.key(END)
+            session.key(F8)
+            session.type("n")
+            session.key(ENTER)
+            assert file.exists()
+            session.key(F8)
+            session.type("s")
+            session.key(ENTER)
+            assert not file.exists()
+            session.key(b"\x1b[H")
+            start = len(session.output)
+            session.key(F8)
+            assert b"Eliminare" not in session.output[start:], "Voce Questo PC eliminabile"
+        finally:
+            session.close()
+
+
+def test_saved_connection_opens_prefilled_dialog_without_password():
+    for protocol in ("ssh", "ftp"):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = pathlib.Path(tmp) / "config"
+            file = saved_connection_fixture(config, protocol=protocol)
+            session = Session(pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
+            try:
+                session.key(LEFT)
+                session.mouse(0, 10, 7)
+                session.mouse(0, 10, 7)
+                assert f"Connessione {protocol.upper()}".encode() in session.output
+                assert b"user@example.invalid" in session.output
+                session.type("other@example.invalid")  # cambia solo il dialog, poi annulla
+                session.key(b"\x1b")
+                session.drain(.2)
+                assert file.read_text().splitlines()[1] == "user@example.invalid"
+            finally:
+                session.key(b"\x1b")
+                session.close()
+
+
+def test_saved_connections_import_only_once():
+    with tempfile.TemporaryDirectory() as tmp:
+        config = pathlib.Path(tmp)
+        directory = config / "fm"
+        directory.mkdir()
+        for protocol in ("ssh", "ftp"):
+            (directory / f"last-{protocol}").write_text("user@example.invalid\n")
+        session = Session(pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            session.key(LEFT)
+            assert len(list((directory / "connections").iterdir())) == 2
+            for _ in range(2):
+                session.key(END)
+                session.key(F8)
+                session.type("s")
+                session.key(ENTER)
+            assert not list((directory / "connections").iterdir())
+        finally:
+            session.close()
+        session = Session(pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            session.key(LEFT)
+            assert not list((directory / "connections").iterdir()), "Connessioni eliminate ricreate"
+        finally:
+            session.close()
 
 
 def test_copy_multiple():
@@ -210,7 +683,7 @@ def test_mouse_double_click_opens_folder():
         try:
             assert b"\x1b[?1000h\x1b[?1006h" in s.output, "Mouse non attivato"
             assert "┌".encode() in s.output, "Cornici Unicode mancanti"
-            assert b"\x1b[38;5;252;48;5;240m" in s.output, "Palette classica MC mancante"
+            assert b"\x1b[38;5;144;48;5;237m" in s.output, "Palette classica MC mancante"
             s.mouse(0, 10, 5)
             s.mouse(0, 10, 5)
             s.key(F7)
@@ -226,7 +699,7 @@ def test_mouse_button_mkdir():
         root = pathlib.Path(tmp)
         s = Session(root)
         try:
-            s.mouse(0, 33, 25)
+            s.mouse(0, 40, 25)
             s.type("button-made")
             s.key(ENTER)
             assert (root / "button-made").is_dir(), "F7 via mouse non funziona"
@@ -269,7 +742,7 @@ def test_mouse_compact_bar_and_wheel():
             (root / f"d{i:02d}").mkdir()
         s = Session(root, cols=40)
         try:
-            s.mouse(0, 23, 25)
+            s.mouse(0, 21, 25)
             s.type("small-window")
             s.key(ENTER)
             assert (root / "small-window").is_dir(), "F7 non cliccabile su finestra stretta"
@@ -281,7 +754,33 @@ def test_mouse_compact_bar_and_wheel():
 
 
 
-def test_gray_palette_and_highlighting():
+def test_size_and_modification_columns():
+    import re
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        file = root / ("long-name-" * 8 + ".txt")
+        file.write_bytes(b"x" * 12345)
+        stamp = 1700000000
+        os.utime(file, (stamp, stamp))
+        expected_date = time.strftime("%d/%m/%Y %H:%M", time.localtime(stamp))
+        for cols in (35, 80, 100, 121):
+            s = Session(root, cols=cols)
+            try:
+                plain = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", bytes(s.output)).decode()
+                assert "Dimensione" in plain and "Ultima modifica" in plain
+                assert f"     12345│{expected_date}" in plain
+                assert "UP--DIR" in plain
+                for row in plain.split("\r\n"):
+                    if "12345│" in row:
+                        assert len(row.rstrip("\r")) <= cols, (cols, row)
+                s.key(DOWN)
+                assert b"12345" in s.output
+            finally:
+                s.close()
+
+
+def test_reference_palette_and_highlighting():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         (root / "dir").mkdir()
@@ -294,15 +793,15 @@ def test_gray_palette_and_highlighting():
         s = Session(root)
         try:
             out = bytes(s.output)
-            assert b"\x1b[38;5;252;48;5;240m" in out, "Sfondo blu / grigio mancante"
-            assert b"\x1b[38;5;232;48;5;250m" in out, "Selezione nero / ciano mancante"
-            assert b"\x1b[1;38;5;255;48;5;240m" in out, "Directory bianche mancanti"
-            assert b"\x1b[38;5;120;48;5;240m" in out, "Eseguibili verdi mancanti"
-            assert b"\x1b[38;5;117;48;5;240m" in out, "Link ciano mancanti"
-            assert b"\x1b[38;5;210;48;5;240m" in out, "Link interrotti rossi mancanti"
+            assert b"\x1b[38;5;144;48;5;237m" in out, "Sfondo grigio scuro e testo giallo mancanti"
+            assert b"\x1b[38;5;252;48;5;23m" in out, "Selezione petrolio mancante"
+            assert b"\x1b[1;38;5;144;48;5;237m" in out, "Directory gialle mancanti"
+            assert b"\x1b[38;5;120;48;5;237m" in out, "Eseguibili verdi mancanti"
+            assert b"\x1b[38;5;117;48;5;237m" in out, "Link ciano mancanti"
+            assert b"\x1b[38;5;210;48;5;237m" in out, "Link interrotti rossi mancanti"
             assert b"\x1b[38;5;254;48;5;236m" in out, "Barra nera comandi mancante"
             s.key(F3)
-            assert b"\x1b[1;38;5;130;48;5;250m" in s.output, "Selezione marcata gialla mancante"
+            assert b"\x1b[1;38;5;228;48;5;23m" in s.output, "Selezione marcata gialla mancante"
         finally:
             s.close()
 
@@ -311,8 +810,8 @@ def test_no_color_fallback():
     with tempfile.TemporaryDirectory() as tmp:
         s = Session(pathlib.Path(tmp), env={"ABFM_NO_COLOR": "1"})
         try:
-            assert b"\x1b[38;5;252;48;5;240m" not in s.output
-            assert b"\x1b[38;5;232;48;5;250m" not in s.output
+            assert b"\x1b[38;5;144;48;5;237m" not in s.output
+            assert b"\x1b[38;5;252;48;5;23m" not in s.output
             assert b"\x1b[38;5;254;48;5;236m" not in s.output
             assert "┌".encode() in s.output
         finally:
@@ -458,6 +957,99 @@ def test_execute_interactive_script():
             session.close()
 
 
+def test_attributes_sudo_retry_and_cancel():
+    for command, cancel, denied in (("chmod", False, True), ("chown", False, True),
+                                     ("chmod", True, True), ("chmod", "interrupt", True),
+                                     ("chown", False, False)):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            work = root / "work"
+            work.mkdir()
+            file = work / "owned.txt"
+            file.write_text("conserva")
+            file.chmod(0o644)
+            tools = root / "bin"
+            tools.mkdir()
+            error = "Operation not permitted" if denied else "invalid user"
+            mock = tools / command
+            mock.write_text(f"#!/bin/sh\nprintf '%s\\n' '{command}: {error}' >&2\nexit 1\n")
+            mock.chmod(0o755)
+            log = root / "sudo.log"
+            sudo = tools / "sudo"
+            sudo.write_text("""#!/bin/sh
+printf '%s\n' "$*" >> "$FM_TEST_SUDO_LOG"
+printf 'Password sudo: ' > /dev/tty
+stty -echo < /dev/tty
+IFS= read -r answer < /dev/tty
+stty echo < /dev/tty
+printf '\n' > /dev/tty
+[ "$FM_TEST_SUDO_CANCEL" = 1 ] && exit 1
+shift
+command=$1
+shift
+exec "/usr/bin/$command" "$@"
+""")
+            sudo.chmod(0o755)
+            session = Session(work, env={"PATH": f"{tools}:{os.environ['PATH']}",
+                                        "FM_TEST_SUDO_LOG": str(log),
+                                        "FM_TEST_SUDO_CANCEL": str(int(bool(cancel)))})
+            try:
+                session.key(b"\x18c")
+                if command == "chmod":
+                    session.type("600")
+                else:
+                    session.key(b"\t")
+                    session.type(f"{os.getuid()}:{os.getgid()}")
+                session.key(ENTER)
+                if denied:
+                    assert b"Password sudo:" in session.output
+                    session.key(b"\x03" if cancel == "interrupt" else b"password-di-prova\n")
+                    session.drain(0.2)
+                    assert "-- " + command + " -- " in log.read_text()
+                    assert b"password-di-prova" not in session.output, "Password mostrata a schermo"
+                    assert ("Non riusciti: 1" if cancel else "Non riusciti: 0").encode() in session.output
+                    if command == "chmod":
+                        assert file.stat().st_mode & 0o777 == (0o644 if cancel else 0o600)
+                else:
+                    assert not log.exists(), "sudo usato per un errore diverso dai permessi"
+                    assert b"invalid user" in session.output
+                assert file.read_text() == "conserva"
+                session.key(b"\x18c")
+                assert b"Permessi e proprietario" in session.output[-15000:]
+                session.key(b"\x1b")
+                session.drain(0.2)
+            finally:
+                session.key(b"\x1b")
+                session.close()
+
+
+def test_ctrl_x_unified_dialog():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        file = root / "mode.txt"
+        file.write_text("data")
+        file.chmod(0o644)
+        session = Session(root)
+        try:
+            session.key(b"\x18")
+            assert b"Permessi e proprietario" not in session.output
+            session.key(b"c")
+            assert b"Permessi e proprietario" in session.output
+            assert b"Utenti" in session.output and b"Gruppi" in session.output
+            session.type("600")
+            session.key(b"\t")
+            session.type(f"{os.getuid()}:{os.getgid()}")
+            session.key(ENTER)
+            assert file.stat().st_mode & 0o777 == 0o600
+            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
+            assert b"chmod 600: modificati 1" in session.output
+            session.key(b"\x18o")
+            assert b"Ctrl+X: C per attributi" in session.output
+        finally:
+            session.key(b"\x1b")
+            session.close()
+
+
 def test_ctrl_x_chmod():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -484,7 +1076,7 @@ def test_ctrl_s_symlink():
         (root / "origin.txt").write_text("source")
         session = Session(root)
         try:
-            session.key(b"\x13")
+            session.key(b"\x18s")
             target = root / "origin.txt.lnk"
             assert target.is_symlink(), "link simbolico non creato"
             assert os.readlink(target) == str(root / "origin.txt"), "link deve essere assoluto"
@@ -508,7 +1100,7 @@ def test_ctrl_x_chown_nonprivileged():
         file.write_text("owned")
         session = Session(root)
         try:
-            session.key(b"\x18o")
+            session.key(b"\x18c\t")
             session.type(f"{os.getuid()}:{os.getgid()}")
             session.key(ENTER)
             assert file.is_file(), "chown ha modificato il contenuto"
@@ -548,7 +1140,7 @@ def test_chmod_dialog_toggle_and_cancel():
         session = Session(root)
         try:
             session.key(b"\x18c")
-            assert b"Permessi (chmod)" in session.output
+            assert b"Permessi e proprietario" in session.output
             session.key(DOWN)   # gruppo / lettura
             session.key(RIGHT)  # gruppo / scrittura
             session.key(b" ")   # attiva il permesso scrittura al gruppo
@@ -569,19 +1161,186 @@ def test_chown_dialog_group_tab_navigation():
         f.write_text("data")
         session = Session(root)
         try:
-            session.key(b"\x18o")
-            assert b"Proprietario e gruppo" in session.output
+            session.key(b"\x18c\t")
+            assert b"Permessi e proprietario" in session.output
             session.type(str(os.getuid()))
             session.key(b"\t")
             session.type(str(os.getgid()))
             session.key(ENTER)
             assert f.stat().st_uid == os.getuid()
             assert f.stat().st_gid == os.getgid()
-            assert b"chown " in session.output
+            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
         finally:
             session.close()
 
 
+
+
+def test_permission_dialog_mouse_buttons_and_resize():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        file = root / "mode.txt"
+        file.write_text("data")
+        file.chmod(0o644)
+        session = Session(root)
+        try:
+            session.key(b"\x18c")
+            session.mouse(0, 30, 8)  # scrittura gruppo
+            session.mouse(0, 38, 24)  # Imposta
+            assert file.stat().st_mode & 0o777 == 0o664
+            session.key(b"\x18c")
+            session.type("777")
+            session.key(b"\t\t\t\t")  # Annulla
+            session.key(ENTER)
+            assert file.stat().st_mode & 0o777 == 0o664
+            session.key(b"\x18c\t")
+            session.type(f"{os.getuid()}:{os.getgid()}")
+            session.mouse(0, 38, 24)
+            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
+            session.key(b"\x18c")
+            session.resize(35)
+            session.key(b"\t")
+            assert b"Gruppi" in session.output[-6000:]
+            session.key(b"\x1b")
+            session.drain(0.2)
+            assert b"Modifica attributi" in session.output
+        finally:
+            session.key(b"\x1b")
+            session.close()
+
+
+
+def test_chown_mc_lists_and_cancel():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        file = root / "owned.txt"
+        file.write_text("data")
+        session = Session(root)
+        try:
+            session.key(b"\x18c\t")
+            for label in (b"Utenti", b"Gruppi", b"File", b"Imposta", b"Annulla"):
+                assert label in session.output[-12000:], label
+            session.key(DOWN)
+            session.key(b"\t")
+            session.key(DOWN)
+            session.key(b"\t")
+            session.key(b"\t")  # Annulla
+            session.key(ENTER)
+            assert b"Modifica attributi annullata" in session.output
+            assert file.stat().st_uid == os.getuid()
+            session.key(b"\x18c\t")
+            session.type(f"{os.getuid()}:{os.getgid()}")
+            session.key(ENTER)
+            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
+            session.key(b"\x18c\t")
+            session.key(UP)
+            session.key(DOWN)
+            session.key(b"\t")
+            session.key(UP)
+            session.key(DOWN)
+            session.key(ENTER)
+            import pwd
+            import grp
+            spec = f"{pwd.getpwuid(os.getuid()).pw_name}:{grp.getgrgid(os.getgid()).gr_name}"
+            assert f"chown {spec}: modificati 1".encode() in session.output
+        finally:
+            session.close()
+
+
+def test_file_operations_retry_with_sudo():
+    for operation, command in (("rename", "mv"), ("copy", "cp"), ("move", "mv"),
+                               ("mkdir", "mkdir"), ("delete", "rm"), ("link", "ln")):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            work, dest, tools = (root / name for name in ("work", "dest", "bin"))
+            for path in (work, dest, tools):
+                path.mkdir()
+            source = work / "originale.txt"
+            source.write_text("conserva")
+            mock = tools / command
+            mock.write_text("#!/bin/sh\nprintf 'Permission denied\\n' >&2\nexit 1\n")
+            mock.chmod(0o755)
+            log = root / "sudo.log"
+            sudo = tools / "sudo"
+            sudo.write_text("""#!/bin/sh
+printf '%s\n' "$*" >> "$FM_TEST_SUDO_LOG"
+printf 'Password sudo: ' > /dev/tty
+stty -echo < /dev/tty
+IFS= read -r answer < /dev/tty
+stty echo < /dev/tty
+printf '\n' > /dev/tty
+shift
+command=$1
+shift
+exec "/usr/bin/$command" "$@"
+""")
+            sudo.chmod(0o755)
+            session = Session(work, env={"PATH": f"{tools}:{os.environ['PATH']}", "FM_TEST_SUDO_LOG": str(log)})
+            try:
+                if operation == "rename":
+                    session.key(F2)
+                    session.type("rinominato.txt")
+                    session.key(ENTER)
+                elif operation in ("copy", "move"):
+                    session.key(F5 if operation == "copy" else F6)
+                    session.type(str(dest))
+                    session.key(ENTER)
+                elif operation == "mkdir":
+                    session.key(F7)
+                    session.type("nuova")
+                    session.key(ENTER)
+                elif operation == "delete":
+                    session.key(F8)
+                    assert not log.exists(), "sudo prima della conferma di eliminazione"
+                    session.type("s")
+                    session.key(ENTER)
+                else:
+                    session.key(b"\x18s")
+                assert b"Password sudo:" in session.output, operation
+                session.key(b"password-di-prova\n")
+                session.drain(.15)
+                assert log.read_text().startswith(f"-- {command} ")
+                assert b"password-di-prova" not in session.output
+                if operation == "rename": assert (work / "rinominato.txt").read_text() == "conserva"
+                elif operation in ("copy", "move"):
+                    assert (dest / source.name).read_text() == "conserva"
+                    assert source.exists() == (operation == "copy")
+                elif operation == "mkdir": assert (work / "nuova").is_dir()
+                elif operation == "delete": assert not source.exists()
+                else: assert (work / "originale.txt.lnk").is_symlink()
+            finally:
+                session.key(b"\x1b")
+                session.close()
+
+
+def test_rename_dialog_edit_cancel_and_mouse():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        file = root / "originale.txt"
+        file.write_text("conserva")
+        session = Session(root)
+        try:
+            session.key(F2)
+            assert b"Nome attuale:" in session.output and b"Nuovo nome:" in session.output
+            session.type("annullato.txt")
+            session.key(b"\t\t")
+            session.key(ENTER)
+            assert file.read_text() == "conserva"
+            assert not (root / "annullato.txt").exists()
+            session.key(F2)
+            session.key(END)
+            session.key(BACK)
+            session.type("T")
+            session.key(ENTER)
+            edited = root / "originale.txT"
+            assert edited.read_text() == "conserva"
+            session.key(F2)
+            session.type("rinominato.txt")
+            session.mouse(0, 39, 18)  # pulsante Rinomina
+            assert (root / "rinominato.txt").read_text() == "conserva"
+        finally:
+            session.key(b"\x1b")
+            session.close()
 
 
 def test_f2_rename_and_no_overwrite():
@@ -676,7 +1435,7 @@ def test_mouse_rename_directory_wide_bar():
         (root / "prima" / "file").write_text("intatto")
         session = Session(root, cols=120)
         try:
-            session.mouse(0, 5, 25)  # F2 nella barra estesa
+            session.mouse(0, 15, 25)  # F2 nella barra estesa
             session.type("dopo")
             session.key(ENTER)
             assert not (root / "prima").exists()
@@ -705,6 +1464,98 @@ def test_move_multiple_relative_destination():
 
 
 
+def test_live_filter_and_enter_opens_or_runs():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "altro").mkdir()
+        (root / "cartella").mkdir()
+        (root / "cartella" / "inside.txt").write_text("dentro")
+        runner = root / "esegui.sh"
+        runner.write_text('#!/bin/sh\nprintf eseguito > risultato\n')
+        runner.chmod(0o755)
+        session = Session(root)
+        try:
+            session.key(b"\x06")
+            start = len(session.output)
+            session.type("car")
+            screen = session.output[start:]
+            assert b"/cartella" in screen
+            assert b"/altro" not in screen, "Filtro non aggiornato prima di Invio"
+            session.key(ENTER)
+            session.key(F7)
+            session.type("nuova")
+            session.key(ENTER)
+            assert (root / "cartella" / "nuova").is_dir()
+            session.key(BACK)
+            session.key(b"\x06")
+            session.type("esegui")
+            session.key(ENTER)
+            assert (root / "risultato").read_text() == "eseguito"
+            session.key(ENTER)  # ritorna dall'eseguibile
+            session.key(b"\x06")
+            session.type("inesistente")
+            session.key(ENTER)
+            assert b"Nessuna corrispondenza" in session.output
+            session.key(b"\x1b")
+            session.drain(.2)
+        finally:
+            session.key(b"\x1b")
+            session.close()
+
+
+def test_parent_reselects_departed_directory():
+    for cols in (80, 120):
+        for back in (LEFT, BACK, b"parent-row"):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = pathlib.Path(tmp)
+                for i in range(30):
+                    (root / f"dir-{i:02}").mkdir()
+                session = Session(root, cols=cols)
+                try:
+                    session.key(END)
+                    session.key(ENTER)
+                    if back == b"parent-row":
+                        session.key(b"\x1b[H")
+                        session.key(ENTER)
+                    else:
+                        session.key(back)
+                    session.key(F2)
+                    session.type("ritrovata")
+                    session.key(ENTER)
+                    assert not (root / "dir-29").exists()
+                    assert (root / "ritrovata").is_dir()
+                finally:
+                    session.close()
+
+
+def test_live_filter_spaces_backspace_and_escape():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        for name in ("alfa uno.txt", "alfa due.txt", "beta.txt"):
+            (root / name).write_text(name)
+        session = Session(root)
+        try:
+            session.key(b"\x06")
+            session.type("alfa ")
+            start = len(session.output)
+            session.type("u")
+            assert b"alfa uno.txt" in session.output[start:]
+            assert b"alfa due.txt" not in session.output[start:]
+            start = len(session.output)
+            session.key(BACK)
+            assert b"alfa due.txt" in session.output[start:]
+            assert b"alfa uno.txt" in session.output[start:]
+            session.type("u")
+            session.key(b"\x1b")
+            session.drain(.2)
+            session.key(F2)
+            session.type("scelto.txt")
+            session.key(ENTER)
+            assert (root / "scelto.txt").read_text() == "alfa uno.txt"
+        finally:
+            session.close()
+
+
 def test_filter_names_and_reset():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -713,9 +1564,9 @@ def test_filter_names_and_reset():
         session = Session(root)
         try:
             session.key(b"\x06")
-            session.type("alpha")
+            session.type("alph")
             start = len(session.output)
-            session.key(ENTER)
+            session.type("a")
             assert b"ALPHA.txt" in session.output[start:]
             assert b"beta.txt" not in session.output[start:]
             session.key(F3)
@@ -734,6 +1585,33 @@ def test_filter_names_and_reset():
             session.close()
 
 
+def test_dual_move_directory_and_failure_reasons():
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = fixture(pathlib.Path(tmp))
+        session = Session(src, cols=120)
+        try:
+            session.key(F6)
+            assert b"Stessa cartella" in session.output
+            assert (src / "tree" / "deep.txt").exists()
+            session.key(b"\t")
+            session.key(LEFT)
+            session.key(UP)  # il padre evidenzia src; dest e' la voce precedente
+            session.key(ENTER)
+            session.key(b"\t")
+            session.key(F6)
+            assert (dst / "tree" / "deep.txt").read_text() == "profondo"
+            assert not (src / "tree").exists()
+            (src / "tree").mkdir()
+            (src / "tree" / "keep.txt").write_text("conserva")
+            session.key(b"r")
+            session.key(F6)
+            assert b"Nome gia' presente" in session.output
+            assert (src / "tree" / "keep.txt").read_text() == "conserva"
+            assert (dst / "tree" / "deep.txt").read_text() == "profondo"
+        finally:
+            session.close()
+
+
 def test_dual_copy_move_and_independent_selection():
     with tempfile.TemporaryDirectory() as tmp:
         src, dst = fixture(pathlib.Path(tmp))
@@ -744,6 +1622,7 @@ def test_dual_copy_move_and_independent_selection():
             session.key(F3)  # seleziona alpha
             session.key(b"\t")
             session.key(LEFT)
+            session.key(UP)  # il padre evidenzia src; dest e' la voce precedente
             session.key(ENTER)  # dest a destra
             session.key(b"\t")
             session.key(F5)  # copia subito nell'altro pannello
@@ -772,7 +1651,6 @@ def test_dual_filter_and_mouse_focus():
         try:
             session.key(b"\x06")
             session.type("alpha")
-            session.key(ENTER)
             session.mouse(0, 70, 6)  # beta nel pannello destro non filtrato
             session.key(F2)
             session.type("gamma.txt")
@@ -796,6 +1674,7 @@ def test_resize_preserves_panes_and_selection():
             session.key(F3)  # tree a sinistra
             session.key(b"\t")
             session.key(LEFT)
+            session.key(UP)  # il padre evidenzia src; dest e' la voce precedente
             session.key(ENTER)  # dest a destra
             session.resize(80)
             session.key(F7)
@@ -821,6 +1700,7 @@ def test_dual_no_overwrite_and_literal_filter():
         try:
             session.key(b"\t")
             session.key(LEFT)
+            session.key(UP)  # il padre evidenzia src; dest e' la voce precedente
             session.key(ENTER)
             session.key(b"\t")
             session.key(b"\x06")
@@ -894,7 +1774,7 @@ def test_ctrl_h_independent_panes_and_resize():
 
 
 def test_filter_clears_on_choice_and_keeps_current_file():
-    for choice in (F3, b" ", ENTER, "mouse"):
+    for choice in (F3, ENTER, "mouse"):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "alpha.txt").write_text("intatto")
@@ -903,7 +1783,6 @@ def test_filter_clears_on_choice_and_keeps_current_file():
             try:
                 session.key(b"\x06")
                 session.type("target")
-                session.key(ENTER)
                 start = len(session.output)
                 if choice == "mouse":
                     session.mouse(0, 10, 5)
@@ -930,7 +1809,6 @@ def test_filter_clears_on_directory_open_and_double_click():
             try:
                 session.key(b"\x06")
                 session.type("target")
-                session.key(ENTER)
                 if mouse:
                     session.mouse(0, 10, 5)
                     session.mouse(0, 10, 5)
@@ -946,7 +1824,7 @@ def test_filter_clears_on_directory_open_and_double_click():
 
 
 if __name__ == "__main__":
-    tests = [test_filter_clears_on_choice_and_keeps_current_file,
+    tests = [test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
              test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
@@ -956,7 +1834,7 @@ if __name__ == "__main__":
              test_filename_with_spaces, test_delete_cancelled, test_no_copy_into_self,
              test_mouse_double_click_opens_folder, test_mouse_button_mkdir,
              test_mouse_prompt_ignores_click, test_mouse_mark_copy,
-             test_mouse_compact_bar_and_wheel, test_gray_palette_and_highlighting,
+             test_mouse_compact_bar_and_wheel, test_reference_palette_and_highlighting,
              test_no_color_fallback, test_ascii_fallback,
              test_hidden_and_mc_directory_prefix, test_mouse_exact_columns_and_rows,
              test_no_flicker_on_cursor_navigation,

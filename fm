@@ -11,8 +11,9 @@ File manager TUI a uno o due pannelli (Bash, senza ncurses).
 
  Frecce Su/Giu                   seleziona la riga (stile Lynx)
  Freccia Destra / Invio           apre dir o avvia file eseguibile
- Freccia Sinistra / Backspace     torna alla directory padre
+ Freccia Sinistra / Backspace     torna al padre sulla cartella lasciata
  PgUp / PgDn / Home / End         navigazione veloce
+ F1                               menu comandi di Midnight Commander
  F2                               rinomina il file o la directory
  F3 (oppure Spazio)              seleziona/deseleziona
  F4                               edita con $EDITOR (oppure nano)
@@ -21,16 +22,15 @@ File manager TUI a uno o due pannelli (Bash, senza ncurses).
  F7                               crea una directory
  F8                               cancella (chiede conferma)
  F10                              esci dal file manager
- Ctrl+X poi C                     finestra permessi stile MC
- Ctrl+X poi O                     finestra proprietario/gruppo
+ Ctrl+X poi C                     permessi, proprietario e gruppo
+ Ctrl+X poi S                     crea un link simbolico (anche Ctrl+S)
  Ctrl+S                           crea link assoluto <nome>.lnk
- Ctrl+F                           filtro per nome (vuoto per rimuoverlo)
+ Ctrl+F                           cerca mentre digiti; Invio apre il risultato
  Ctrl+H                           mostra/nasconde file e cartelle nascosti
  Tab                              cambia pannello (da 100 colonne)
  Mouse click                      seleziona / doppio click apre
  Rotella mouse                    scorre l'elenco
  r                                aggiorna la lista
- q                                esci
 
 Opzioni d'ambiente:
  ABFM_NO_ALT_SCREEN=1             non usare lo schermo alternativo
@@ -69,7 +69,7 @@ mouse_enabled=0
 declare -a entries=() targets=()
 declare -A marks=()
 declare -a action_keys=() action_starts=() action_ends=()
-notice='Lynx: Su/Giu scegli, Destra apre, Sinistra torna. q esce.'
+notice='Lynx: Su/Giu scegli, Destra apre, Sinistra torna. F10 esce.'
 cursor=0
 scroll=0
 rows=24 cols=80 visible=12 inner=78
@@ -79,16 +79,24 @@ last_click_ms=0
 last_click_path=''
 MOUSE_BTN=0; MOUSE_X=0; MOUSE_Y=0; MOUSE_ACTION=''
 PENDING_CHAR=''
-active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' show_hidden=1 resized=0
+active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' filter_editing=0 show_hidden=1 resized=0
+# Stato delle due viste; la cronologia e' distinta per pannello e cartella.
 declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '') pane_hidden=(1 1)
-declare -A pane_marks=()
+declare -A pane_marks=() directory_focus=() directory_scroll=() directory_marks=()
+# Origine dell'ultima marcatura esplicita, usata da F5/F6 a pannello unico.
+connections_root='@connections'
+connections_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections
+declare -A connection_names=() connection_protocols=() connection_addresses=()
+declare -A remote_labels=() remote_protocols=()
+declare -a selection_sources=('' '')
 # Coordinate di rendering: righe salvate per evitare redraw completi.
 needs_full=1
 painted_rows=0 painted_cols=0 painted_scroll=-1 painted_cursor=-1
 painted_notice=''
 USE_COLOR=1; USE_UNICODE=1
-CLR_RESET='' CLR_BORDER='' CLR_TITLE='' CLR_STATUS='' CLR_NOTICE='' CLR_CURSOR='' CLR_ACTION=''
+CLR_RESET='' CLR_BORDER='' CLR_HEADER='' CLR_TITLE='' CLR_STATUS='' CLR_NOTICE='' CLR_CURSOR=''
 CLR_PANEL='' CLR_DIR='' CLR_EXEC='' CLR_LINK='' CLR_BADLINK=''
+CLR_DIALOG='' CLR_DIALOG_TITLE='' CLR_DIALOG_FOCUS=''
 CLR_MARKED='' CLR_MARK_CURSOR='' CLR_FOOTER='' CLR_HOTKEY=''
 C_TL='+' C_TR='+' C_BL='+' C_BR='+' C_H='-' C_V='|' C_LT='+' C_RT='+'
 init_theme() {
@@ -97,24 +105,28 @@ init_theme() {
     [[ -n ${NO_COLOR:-} || ${ABFM_NO_COLOR:-0} == 1 || ${TERM:-} == dumb ]] && USE_COLOR=0
     [[ ${ABFM_ASCII:-0} == 1 ]] && USE_UNICODE=0
     [[ $locale != *UTF-8* && $locale != *utf8* && $locale != *utf-8* ]] && USE_UNICODE=0
-    # Palette neutra grigia con colori per tipo file, ANSI 256 colori.
+    # Palette del riferimento con colori per tipo file, ANSI 256 colori.
     if (( USE_COLOR )); then
         CLR_RESET=$'\033[0m'
-        # Tema grigio neutro: pannello grafite, evidenziazione chiara.
-        CLR_PANEL=$'\033[38;5;252;48;5;240m'
-        CLR_BORDER=$'\033[38;5;252;48;5;240m'
-        CLR_TITLE=$'\033[1;38;5;255;48;5;240m'
-        CLR_DIR=$'\033[1;38;5;255;48;5;240m'
-        CLR_EXEC=$'\033[38;5;120;48;5;240m'
-        CLR_LINK=$'\033[38;5;117;48;5;240m'
-        CLR_BADLINK=$'\033[38;5;210;48;5;240m'
-        CLR_MARKED=$'\033[1;38;5;228;48;5;240m'
-        CLR_CURSOR=$'\033[38;5;232;48;5;250m'
-        CLR_MARK_CURSOR=$'\033[1;38;5;130;48;5;250m'
+        CLR_DIALOG=$'\033[0;38;5;252;48;5;239m'
+        CLR_DIALOG_TITLE=$'\033[1;38;5;180;48;5;239m'
+        CLR_DIALOG_FOCUS=$'\033[1;38;5;228;48;5;23m'
+        # Pannello grigio scuro, testo giallo tenue e cursore petrolio.
+        CLR_PANEL=$'\033[38;5;144;48;5;237m'
+        CLR_BORDER=$'\033[38;5;144;48;5;237m'
+        CLR_HEADER=$'\033[1;33;48;5;237m'
+        CLR_TITLE=$'\033[1;38;5;144;48;5;237m'
+        CLR_DIR=$'\033[1;38;5;144;48;5;237m'
+        CLR_EXEC=$'\033[38;5;120;48;5;237m'
+        CLR_LINK=$'\033[38;5;117;48;5;237m'
+        CLR_BADLINK=$'\033[38;5;210;48;5;237m'
+        CLR_MARKED=$'\033[1;38;5;228;48;5;237m'
+        CLR_CURSOR=$'\033[38;5;252;48;5;23m'
+        CLR_MARK_CURSOR=$'\033[1;38;5;228;48;5;23m'
         CLR_STATUS=$'\033[38;5;236;48;5;250m'
-        CLR_NOTICE=$'\033[38;5;255;48;5;240m'
+        CLR_NOTICE=$'\033[38;5;255;48;5;237m'
         CLR_FOOTER=$'\033[38;5;254;48;5;236m'
-        CLR_HOTKEY=$'\033[38;5;232;48;5;250m'
+        CLR_HOTKEY=$'\033[38;5;252;48;5;23m'
     fi
 
     if (( USE_UNICODE )); then
@@ -240,6 +252,7 @@ load_pane() {
 
 switch_pane() {
     (( dual_pane )) || return 0
+    filter_editing=0
     save_pane
     active_pane=$((1-active_pane))
     load_pane "$active_pane"
@@ -248,14 +261,14 @@ switch_pane() {
 }
 
 filter_items() {
-    if ! ask 'Filtro nome (vuoto = tutti, Esc annulla): '; then return; fi
-    filter=$REPLY
-    cursor=1; scroll=0
+    filter_editing=1
+    filter=''; cursor=1; scroll=0
     reload
-    notice="Filtro: ${filter:-tutti}"
+    notice='Filtro: digita per cercare; Invio apre, Esc annulla.'
 }
 
 clear_filter() {
+    filter_editing=0
     [[ -n $filter ]] || return 0
     local current=${entries[cursor]} offset=$((cursor-scroll)) path i
     local -a selected=("${!marks[@]}")
@@ -293,13 +306,18 @@ reload() {
     local path name
     local -a dirs=() files=()
     entries=('..')
-    for path in "$cwd"/*; do
-        name=${path##*/}
-        if (( !show_hidden )) && [[ $name == .* ]]; then continue; fi
-        [[ ${name,,} == *"${filter,,}"* ]] || continue
-        [[ -d $path ]] && dirs+=("$path") || files+=("$path")
-    done
-    entries+=("${dirs[@]}" "${files[@]}")
+    if [[ $cwd == "$connections_root" ]]; then
+        entries=('local' 'ssh' 'ftp')
+        load_saved_connections
+    else
+        for path in "$cwd"/*; do
+            name=${path##*/}
+            if (( !show_hidden )) && [[ $name == .* ]]; then continue; fi
+            [[ ${name,,} == *"${filter,,}"* ]] || continue
+            [[ -d $path ]] && dirs+=("$path") || files+=("$path")
+        done
+        entries+=("${dirs[@]}" "${files[@]}")
+    fi
     (( cursor >= ${#entries[@]} )) && cursor=$((${#entries[@]}-1))
     (( cursor < 0 )) && cursor=0
     (( scroll > cursor )) && scroll=$cursor
@@ -316,25 +334,26 @@ sync_scroll() {
 
 render_actions() {
     local -a segs=(
-        '[F2] Rinom.' '[F3] Selez.' '[F4] Edita' '[F5] Copia' '[F6] Sposta' '[F7] CreaDir' '[F8] Elimina' '[F10] Esci'
+        '[F1] Menu' '[F2] Rinom.' '[F3] Selez.' '[F4] Edita' '[F5] Copia' '[F6] Sposta' '[F7] CreaDir' '[F8] Elimina' '[F10] Esci'
     )
     # Barra MC: tasti evidenziati su ciano, comandi su fondo nero.
-    action_keys=(F2 F3 F4 F5 F6 F7 F8 F10)
-    if (( inner < 105 )); then
-        segs=('2Rin' '3Sel' '4Ed' '5Cop' '6Spo' '7Dir' '8Del' '10Esci')
-        if (( inner < 48 )); then
-            segs=('2R' '3S' '4E' '5C' '6M' '7D' '8X' '10Q')
+    action_keys=(F1 F2 F3 F4 F5 F6 F7 F8 F10)
+    if (( inner < 113 )); then
+        segs=('1Menu' '2Rin' '3Sel' '4Ed' '5Cop' '6Spo' '7Dir' '8Del' '10Esci')
+        if (( inner < 55 )); then
+            segs=('1U' '2R' '3S' '4E' '5C' '6M' '7D' '8X' '10Q')
         fi
     fi
     action_starts=()
     action_ends=()
-    local seg idx used=1 prefix suffix start width
+    local seg idx used=1 prefix suffix start width gap=2
+    (( inner < 55 )) && gap=1
     printf '%s%s%s ' "$CLR_BORDER" "$C_V" "$CLR_FOOTER" >&9
     for idx in "${!segs[@]}"; do
         seg=${segs[idx]}
         if (( idx > 0 )); then
-            printf '  ' >&9
-            ((used+=2))
+            printf '%*s' "$gap" '' >&9
+            ((used+=gap))
         fi
         start=$((used + 2))
         if [[ $seg == \[* ]]; then
@@ -357,15 +376,29 @@ render_actions() {
     printf '%s%s%s\r\n' "$CLR_BORDER" "$C_V" "$CLR_RESET" >&9
 }
 
+# Le colonne mantengono la stessa posizione anche con nomi lunghi.
+entry_columns() {
+    local name=$1 bytes=$2 modified=$3 style=$4 name_width=$((inner-28))
+    fit "$name" "$name_width"
+    name=$REPLY
+    fit "$bytes" 10
+    printf -v name '%-*s%s%10s%s%-16s' "$name_width" "$name" "$C_V" "$REPLY" "$C_V" "$modified"
+    line_text "$name" "$style"
+}
+
+column_header() {
+    entry_columns ' Nome' 'Dimensione' 'Ultima modifica' "$CLR_HEADER"
+}
+
 # Stampa la riga visibile nella posizione reale del terminale (1-based).
-# Y=4 e' la prima riga, dopo cornice, titolo e separatore.
+# Y=4 e' la prima riga, dopo cornice, titolo e intestazioni.
 paint_entry() {
-    local idx=$1 n item label selected kind row_style
+    local idx=$1 n item label selected kind row_style metadata bytes modified epoch
     (( idx >= scroll && idx < scroll+visible )) || return 0
     n=$((idx-scroll))
     printf '\033[%d;%dH' "$((items_y+n))" "$pane_x" >&9
     if (( idx >= ${#entries[@]} )); then
-        line_text ''
+        entry_columns '' '' '' "$CLR_PANEL"
         return
     fi
     item=${entries[idx]}
@@ -374,7 +407,13 @@ paint_entry() {
     row_style=$CLR_PANEL
     kind=' '
     label=${item##*/}
-    if [[ $item == '..' ]]; then
+    if [[ $cwd == "$connections_root" ]]; then
+        case $item in
+            local) label='Questo PC';; ssh) label='SSH';; ftp) label='FTP';;
+            profile:*) label=${connection_names[${item#profile:}]:-Connessione};;
+        esac
+        kind='/'; row_style=$CLR_DIR
+    elif [[ $item == '..' ]]; then
         kind='/'; label='..'; row_style=$CLR_DIR
     elif [[ -L $item ]]; then
         kind='@'
@@ -389,7 +428,17 @@ paint_entry() {
         row_style=$CLR_CURSOR
         [[ -v marks["$item"] ]] && row_style=$CLR_MARK_CURSOR
     fi
-    line_text " $selected $kind$label" "$row_style"
+    bytes='-'; modified='-'
+    if [[ $cwd == "$connections_root" ]]; then
+        bytes=''; modified=''
+    elif [[ $item == '..' ]]; then
+        bytes='UP--DIR'
+    elif metadata=$(stat -c '%s %Y' -- "$item" 2>/dev/null); then
+        read -r bytes epoch <<< "$metadata"
+        if (( ${#bytes} > 10 )); then bytes=$(numfmt --to=iec --suffix=B "$bytes"); fi
+        printf -v modified '%(%d/%m/%Y %H:%M)T' "$epoch"
+    fi
+    entry_columns " $selected $kind$label" "$bytes" "$modified" "$row_style"
 }
 
 draw_panel() {
@@ -400,15 +449,16 @@ draw_panel() {
     load_pane "$drawing_pane"
     pane_geometry "$drawing_pane"
     sync_scroll
-    title=" $cwd"
-    (( drawing_pane == active_pane )) && title=" * $cwd"
+    display_path "$cwd"
+    title=" $REPLY"
+    (( drawing_pane == active_pane )) && title=" * $REPLY"
     [[ -n $filter ]] && title+=" [Filtro: $filter]"
     printf '\033[1;%dH' "$pane_x" >&9
     border top
     printf '\033[2;%dH' "$pane_x" >&9
     line_text "$title" "$CLR_TITLE"
     printf '\033[3;%dH' "$pane_x" >&9
-    border mid
+    column_header
     for ((i=0; i<visible; i++)); do paint_entry "$((scroll+i))"; done
     printf '\033[%d;%dH' "$((visible+4))" "$pane_x" >&9
     border bottom
@@ -444,7 +494,6 @@ draw() {
     sync_scroll
     items_y=4
     actions_y=$((visible+5))
-    help_y=$((visible+6))
     notice_y=$((visible+7))
 
     if (( needs_full || rows != painted_rows || cols != painted_cols || scroll != painted_scroll )); then
@@ -455,15 +504,16 @@ draw() {
         else
             printf '\033[H' >&9
             border top
-            line_text " fm  $cwd${filter:+ [Filtro: $filter]}" "$CLR_TITLE"
-            border mid
+            display_path "$cwd"
+            line_text " fm  $REPLY${filter:+ [Filtro: $filter]}" "$CLR_TITLE"
+            column_header
             for ((i=0; i<visible; i++)); do
                 paint_entry "$((scroll+i))"
             done
             printf '\033[%d;1H' "$((visible+4))" >&9
             border mid
             render_actions
-            line_text ' Frecce: naviga | Ctrl+F: filtro | q/F10: esci' "$CLR_STATUS"
+            line_text ' Frecce: naviga | Ctrl+F: filtro | F10: esci' "$CLR_STATUS"
             line_text " $notice" "$CLR_NOTICE"
             border bottom
         fi
@@ -500,7 +550,7 @@ input_key() {
             fi
             if [[ $next != '[' && $next != 'O' ]]; then
                 # Esc seguito rapidamente da una lettera: non perdere
-                # la lettera (es. Esc per annullare e subito q per uscire).
+                # la lettera digitata subito dopo Esc.
                 PENDING_CHAR=$next
                 KEY='ESC'
                 return 0
@@ -528,7 +578,9 @@ input_key() {
             case $code in
                 '[A') KEY='UP';; '[B') KEY='DOWN';; '[C') KEY='RIGHT';; '[D') KEY='LEFT';; '[H'|'OH'|'[1~'|'[7~') KEY='HOME';;
                 '[F'|'OF'|'[4~'|'[8~') KEY='END';;
+                '[3~') KEY='DELETE';;
                 '[5~') KEY='PAGEUP';; '[6~') KEY='PAGEDOWN';;
+                'OP'|'[11~'|'[[A') KEY='F1';;
                 'OQ'|'[12~'|'[[B') KEY='F2';;
                 'OR'|'[13~'|'[[C') KEY='F3';;
                 'OS'|'[14~'|'[[D') KEY='F4';;
@@ -543,16 +595,15 @@ input_key() {
         ''|$'\r'|$'\n') KEY='ENTER';;
         $'\177') KEY='BACK';;
         $'\b') KEY='HIDDEN';;
-        ' ') KEY='F3';;
+        ' ') if (( filter_editing )); then KEY=' '; else KEY='F3'; fi;;
         $'\023') KEY='SYMLINK';;
         $'\006') KEY='FILTER';;
         $'\t') KEY='TAB';;
         $'\030')
-            # Sequenza MC: Ctrl+X poi C o O.
             IFS= read -rsn1 -u9 next || return 1
             case $next in
-                c|C) KEY='CHMOD';;
-                o|O) KEY='CHOWN';;
+                c|C) KEY='ATTRIBUTES';;
+                s|S) KEY='SYMLINK';;
                 *) KEY='BAD_CHORD';;
             esac
             ;;
@@ -599,7 +650,7 @@ ask() {
 
 select_current() {
     local path=${entries[cursor]}
-    if [[ $path == '..' ]]; then
+    if [[ $path == '..' || $cwd == "$connections_root" ]]; then
         notice="La directory padre non e' selezionabile."
         return
     fi
@@ -610,15 +661,27 @@ select_current() {
         marks["$path"]=1
         notice='Elemento selezionato (*).'
     fi
+    selection_sources[active_pane]=$cwd
 }
 
 collect() {
-    local path
+    local path key scope=${1:-current}
+    local -a saved_targets=()
     targets=()
     for path in "${entries[@]}"; do
         [[ $path == '..' ]] && continue
         [[ -v marks["$path"] ]] && targets+=("$path")
     done
+    # A pannello unico la selezione esplicita resta nella sua cartella di origine.
+    if [[ $scope == transfer ]] && (( !dual_pane )) &&
+       [[ -n ${selection_sources[active_pane]} && ${selection_sources[active_pane]} != "$cwd" ]]; then
+        for key in "${!directory_marks[@]}"; do
+            if [[ $key == "$active_pane:"* && ${directory_marks[$key]} == "${selection_sources[active_pane]}" ]]; then
+                saved_targets+=("${key#*:}")
+            fi
+        done
+        (( ${#saved_targets[@]} )) && targets=("${saved_targets[@]}")
+    fi
     if (( ${#targets[@]} == 0 )); then
         path=${entries[cursor]}
         [[ $path != '..' ]] && targets+=("$path")
@@ -626,82 +689,115 @@ collect() {
 }
 
 rename_item() {
-    local path=${entries[cursor]} name
+    local path=${entries[cursor]} name file_error=''
     if [[ $path == '..' ]]; then
         notice='Seleziona prima un elemento.'
         return
     fi
-    if ! ask "Nuovo nome di ${path##*/} (Esc annulla): "; then return; fi
+    if ! rename_dialog "${path##*/}"; then return; fi
     name=$REPLY
     if [[ -z $name || $name == '.' || $name == '..' || $name == */* ]]; then
         notice='Nome non valido.'
         return
     fi
+    if [[ $name == "${path##*/}" ]]; then notice='Nome invariato.'; return; fi
     if [[ -e $cwd/$name || -L $cwd/$name ]]; then
         notice="Esiste gia' un elemento con quel nome."
         return
     fi
-    if mv -T -- "$path" "$cwd/$name" 2>/dev/null; then
+    if file_command mv -T -- "$path" "$cwd/$name"; then
         reload
         notice="Rinominato: $name"
     else
-        notice='Rinomina non riuscita.'
+        notice="Rinomina non riuscita: $file_error"
     fi
 }
 
 transfer_items() {
-    local mode=$1 destination src dst okay=0 failed=0
-    collect
+    local mode=$1 destination src dst source_root='' destination_root='' ftp_endpoint=0 ftp_move=0 file_error='' reason='' okay=0 failed=0
+    local -a transfer_command=(mv -T)
+    [[ $mode == copy ]] && transfer_command=(cp -aT)
+    collect transfer
     if (( ${#targets[@]} == 0 )); then
         notice='Seleziona prima un elemento.'
         return
     fi
     if (( dual_pane )); then
         destination=${pane_dirs[1-active_pane]}
+        if [[ $destination == "$connections_root" ]]; then
+            notice='Apri una cartella nel pannello di destinazione.'; return
+        fi
         if ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
             notice='Directory del pannello opposto non accessibile.'
             return
         fi
     else
-        if ! ask 'Directory di destinazione (Esc annulla): '; then return; fi
-        destination=$REPLY
+        local prompt='Directory di destinazione (Esc annulla): ' default=''
+        if [[ ${targets[0]%/*} != "$cwd" ]]; then
+            prompt='Destinazione (Invio = cartella corrente, Esc annulla): '
+            default=$cwd
+        fi
+        if ! ask "$prompt"; then return; fi
+        destination=${REPLY:-$default}
+        if [[ -z $destination ]]; then notice='Directory di destinazione non valida.'; return; fi
         [[ $destination != /* ]] && destination="$cwd/$destination"
-        if [[ -z $REPLY ]] || ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
+        if ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
             notice='Directory di destinazione non valida.'
             return
         fi
     fi
+    if is_remote_path "${targets[0]}"; then
+        source_root=$REPLY
+        [[ ${remote_protocols[$REPLY]} == ftp ]] && ftp_endpoint=1
+    fi
+    if is_remote_path "$destination"; then
+        destination_root=$REPLY
+        [[ ${remote_protocols[$REPLY]} == ftp ]] && ftp_endpoint=1
+    fi
+    # FTP non garantisce attributi Unix. Tra mount diversi, elimina solo dopo una copia riuscita.
+    if (( ftp_endpoint )) && { [[ $mode == copy ]] || [[ $source_root != "$destination_root" ]]; }; then
+        transfer_command=(cp -RT '--no-preserve=mode,ownership,timestamps')
+        [[ $mode == move ]] && ftp_move=1
+    fi
     for src in "${targets[@]}"; do
         dst="$destination/${src##*/}"
-        if [[ ! -e $src && ! -L $src ]] || [[ -e $dst || -L $dst ]]; then
+        if [[ $src == "$dst" ]]; then
+            reason=${reason:-"Stessa cartella di origine e destinazione."}
+            ((failed+=1)); continue
+        fi
+        if [[ ! -e $src && ! -L $src ]]; then
+            reason=${reason:-"Origine non disponibile: ${src##*/}"}
+            ((failed+=1)); continue
+        fi
+        if [[ -e $dst || -L $dst ]]; then
+            reason=${reason:-"Nome gia' presente nella destinazione: ${src##*/}"}
             ((failed+=1)); continue
         fi
         # Non copiare o spostare una directory al proprio interno.
         if [[ -d $src && ! -L $src && "$destination/" == "$src/"* ]]; then
+            reason=${reason:-"Destinazione interna alla cartella da trasferire."}
             ((failed+=1)); continue
         fi
-        if [[ $mode == copy ]]; then
-            if cp -aT -- "$src" "$dst" >/dev/null 2>&1; then
-                ((okay+=1))
-            else
-                ((failed+=1))
+        if file_command "${transfer_command[@]}" -- "$src" "$dst"; then
+            if (( ftp_move )) && ! file_command rm -rf -- "$src"; then
+                reason=${reason:-$file_error}; ((failed+=1)); continue
             fi
+            ((okay+=1))
         else
-            if mv -T -- "$src" "$dst" >/dev/null 2>&1; then
-                ((okay+=1))
-            else
-                ((failed+=1))
-            fi
+            reason=${reason:-$file_error}
+            ((failed+=1))
         fi
     done
+    for src in "${targets[@]}"; do unset 'directory_marks[$active_pane:$src]'; done
+    selection_sources[active_pane]=''
     marks=()
     cursor=1
     reload
-    notice="Operazione completata: $okay. Non riusciti: $failed (nessuna sovrascrittura)."
+    notice="${reason:+$reason }Operazione completata: $okay. Non riusciti: $failed (nessuna sovrascrittura)."
 }
 
 new_dir() {
-    local name
+    local name file_error=''
     if ! ask 'Nome nuova directory (Esc annulla): '; then return; fi
     name=$REPLY
     if [[ -z $name || $name == '.' || $name == '..' || $name == */* ]]; then
@@ -712,16 +808,16 @@ new_dir() {
         notice="Esiste gia' un elemento con quel nome."
         return
     fi
-    if mkdir -- "$cwd/$name" 2>/dev/null; then
+    if file_command mkdir -- "$cwd/$name"; then
         notice="Directory creata: $name"
     else
-        notice='Creazione non riuscita (permessi o nome non valido).'
+        notice="Creazione non riuscita: $file_error"
     fi
     reload
 }
 
 delete_items() {
-    local path yes count=0 errors=0
+    local path yes file_error='' reason='' count=0 errors=0
     collect
     if (( ${#targets[@]} == 0 )); then
         notice='Seleziona prima un elemento.'
@@ -734,15 +830,16 @@ delete_items() {
         return
     fi
     for path in "${targets[@]}"; do
-        if rm -rf -- "$path" 2>/dev/null; then
+        if file_command rm -rf -- "$path"; then
             ((count+=1))
         else
+            reason=${reason:-$file_error}
             ((errors+=1))
         fi
     done
     cursor=1
     reload
-    notice="Eliminati: $count. Errori: $errors."
+    notice="${reason:+$reason }Eliminati: $count. Errori: $errors."
 }
 
 # Libera il terminale per eseguire un programma interattivo.
@@ -773,14 +870,16 @@ edit_item() {
 
 # Passa il terminale al comando e lo ripristina al termine.
 run_program() {
-    local wait_for_enter=$1 status
+    local wait_for_enter=$1 status run_cwd=$cwd
     shift
+    local program_name=${run_program_label:-${1##*/}}
     printf '\033[?1000l\033[?1006l\033[?25h%s' "$CLR_RESET" >&9
     (( alt_screen )) && printf '\033[?1049l' >&9
     stty "$original_tty" <&9 || return
-    printf '\r\nfm: esecuzione di %s\r\n' "${1##*/}" >&9
+    printf '\r\nfm: esecuzione di %s\r\n' "$program_name" >&9
     # Invocazione diretta senza eval e senza interpolare il nome.
-    (cd -- "$cwd" && "$@") <&9 >&9 2>&9
+    [[ $run_cwd == "$connections_root" ]] && run_cwd=/
+    (cd -- "$run_cwd" && "$@") <&9 >&9 2>&9
     status=$?
     if (( wait_for_enter )); then
         printf '\r\n[Uscita: %d] Premi Invio per tornare al file manager...' "$status" >&9
@@ -790,247 +889,584 @@ run_program() {
     (( alt_screen )) && printf '\033[?1049h' >&9
     printf '\033[?25l\033[?1000h\033[?1006h' >&9
     needs_full=1
-    notice="Eseguito: ${1##*/} (codice $status)."
+    notice="Eseguito: $program_name (codice $status)."
+    return "$status"
 }
 
-# Finestre modali con bordi e colori MC, senza dialog/ncurses.
-# Tutti i movimenti sono assoluti e non producono scroll del terminale.
+# sudo gestisce la password sul terminale: fm non la legge né la conserva.
+file_command() {
+    local error status
+    file_error=''
+    if error=$(LC_ALL=C "$@" 2>&1); then return 0; fi
+    if [[ $error == *'Operation not permitted'* || $error == *'Permission denied'* ]]; then
+        local argument
+        for argument in "$@"; do
+            if is_remote_path "$argument"; then file_error='Permessi negati sul server remoto.'; return 1; fi
+        done
+        trap ':' INT
+        run_program 0 sudo -- "$@"
+        status=$?
+        trap 'exit 130' INT
+        (( status != 0 )) && file_error='Operazione sudo annullata o non riuscita.'
+        return "$status"
+    fi
+    safe "$error"
+    file_error=$REPLY
+    return 1
+}
+
+# Finestre modali con la palette del tema MC modarin256-thin.
 modal_frame() {
     local title=$1 i d
+    if (( resized )); then resized=0; needs_full=1; draw; fi
     size
     modal_w=$((cols-4))
-    (( modal_w > 58 )) && modal_w=58
-    modal_h=12
+    (( modal_w > ${2:-78} )) && modal_w=${2:-78}
+    modal_h=${3:-20}
+    (( modal_h > rows )) && modal_h=$rows
     modal_x=$(((cols-modal_w)/2+1))
     modal_y=$(((rows-modal_h)/2+1))
+    modal_buttons_x=$(((modal_w-25)/2))
+    modal_buttons_row=$((modal_h-3))
     printf -v d '%*s' "$((modal_w-2))" ''
     d=${d// /$C_H}
-    printf '\033[%d;%dH%s%s%s%s%s' "$modal_y" "$modal_x" "$CLR_BORDER" "$C_TL" "$d" "$C_TR" "$CLR_RESET" >&9
+    printf '\033[%d;%dH%s%s%s%s%s' "$modal_y" "$modal_x" "$CLR_DIALOG" "$C_TL" "$d" "$C_TR" "$CLR_RESET" >&9
     for ((i=1; i<modal_h-1; i++)); do
-        printf '\033[%d;%dH%s%s%s%*s%s%s%s' \
-            "$((modal_y+i))" "$modal_x" "$CLR_BORDER" "$C_V" "$CLR_PANEL" \
-            "$((modal_w-2))" '' "$CLR_BORDER" "$C_V" "$CLR_RESET" >&9
+        printf '\033[%d;%dH%s%s%*s%s%s' "$((modal_y+i))" "$modal_x" \
+            "$CLR_DIALOG" "$C_V" "$((modal_w-2))" '' "$C_V" "$CLR_RESET" >&9
     done
-    printf '\033[%d;%dH%s%s%s%s%s' \
-        "$((modal_y+modal_h-1))" "$modal_x" "$CLR_BORDER" "$C_BL" "$d" "$C_BR" "$CLR_RESET" >&9
-    modal_line 1 " $title" "$CLR_TITLE"
+    printf '\033[%d;%dH%s%s%s%s%s' "$((modal_y+modal_h-1))" "$modal_x" \
+        "$CLR_DIALOG" "$C_BL" "$d" "$C_BR" "$CLR_RESET" >&9
+    fit " $title " "$((modal_w-4))"
+    modal_text 0 "$(((modal_w-${#REPLY})/2))" "${#REPLY}" "$REPLY" "$CLR_DIALOG_TITLE"
+}
+
+modal_text() {
+    local line=$1 column=$2 width=$3 content=$4 style=${5:-$CLR_DIALOG}
+    fit "$content" "$width"
+    printf '\033[%d;%dH%s%-*s%s' "$((modal_y+line))" "$((modal_x+column))" \
+        "$style" "$width" "$REPLY" "$CLR_RESET" >&9
 }
 
 modal_line() {
-    local line=$1 content=$2 style=${3:-$CLR_PANEL}
-    fit "$content" "$((modal_w-4))"
-    printf '\033[%d;%dH%s%-*s%s' "$((modal_y+line))" "$((modal_x+2))" \
-        "$style" "$((modal_w-4))" "$REPLY" "$CLR_RESET" >&9
+    modal_text "$1" 2 "$((modal_w-4))" "$2" "${3:-$CLR_DIALOG}"
 }
 
-chmod_dialog() {
-    local base_mode=$1 new_mode=$2 focus=$3 digits=$4
-    local row col check mask value label i rowtext
-    modal_frame 'Permessi (chmod)'
-    modal_line 2 "Corrente: $base_mode     Nuovo: $new_mode"
-    modal_line 3 '             Lett.   Scritt.  Esec.'
-    for ((row=0; row<3; row++)); do
-        case $row in 0) label='Utente';; 1) label='Gruppo';; 2) label='Altri ';; esac
-        rowtext="$label      "
-        for ((col=0; col<3; col++)); do
-            i=$((row*3+col))
-            mask=$((1 << (8-i)))
-            check=' '
-            (( perms & mask )) && check='x'
-            if (( i == focus )); then
-                rowtext+="<$check>      "
-            else
-                rowtext+="[$check]      "
-            fi
-        done
-        modal_line "$((4+row))" "$rowtext"
+modal_rule() {
+    local line=$1 d
+    printf -v d '%*s' "$((modal_w-2))" ''
+    modal_text "$line" 0 "$modal_w" "$C_LT${d// /$C_H}$C_RT"
+}
+
+modal_box() {
+    local x=$1 width=$2 title=$3 bottom=$4 top=${5:-3} i d
+    printf -v d '%*s' "$((width-2))" ''
+    modal_text "$top" "$x" "$width" "$C_TL${d// /$C_H}$C_TR"
+    modal_text "$top" "$((x+2))" "$((width-4))" " $title " "$CLR_DIALOG_TITLE"
+    for ((i=top+1; i<bottom; i++)); do
+        modal_text "$i" "$x" 1 "$C_V"
+        modal_text "$i" "$((x+width-1))" 1 "$C_V"
     done
-    modal_line 7 "Cella attiva: $((focus/3+1)) / $((focus%3+1))"
-    if [[ -n $digits ]]; then
-        modal_line 8 "Ottale digitato: $digits" "$CLR_MARKED"
-    else
-        modal_line 8 'Frecce: naviga    Spazio: cambia' "$CLR_STATUS"
-    fi
-    modal_line 9 'Oppure digita 755, 0644 o simili'
-    modal_line 10 'Invio: Applica       Esc: Annulla' "$CLR_TITLE"
+    modal_text "$bottom" "$x" "$width" "$C_BL${d// /$C_H}$C_BR"
 }
 
-chmod_items() {
-    local path base_mode mode digits='' focus=0 perms mask key new_mode
-    local changed=0 failed=0
-    collect
-    if (( ${#targets[@]} == 0 )); then notice='Nessun elemento selezionato.'; return; fi
-    base_mode=''
-    for path in "${targets[@]}"; do
-        if [[ ! -L $path ]]; then
-            base_mode=$(stat -c %a -- "$path" 2>/dev/null) || :
-            break
+modal_buttons() {
+    local focus=$1 label=${2:-Imposta} line=$modal_buttons_row x=$modal_buttons_x
+    modal_text "$line" "$x" 13 "[ $label ]" "$CLR_DIALOG"
+    modal_text "$line" "$((x+14))" 11 '[ Annulla ]' "$CLR_DIALOG"
+    (( focus == 0 )) && modal_text "$line" "$x" 13 "[<$label>]" "$CLR_DIALOG_FOCUS"
+    (( focus == 1 )) && modal_text "$line" "$((x+14))" 11 '[<Annulla>]' "$CLR_DIALOG_FOCUS"
+    return 0
+}
+
+# Disegno e hitbox usano le stesse coordinate calcolate da modal_frame.
+modal_button_at() {
+    local x=$((MOUSE_X-modal_x-modal_buttons_x))
+    REPLY=''
+    (( MOUSE_Y == modal_y+modal_buttons_row )) || return 1
+    if (( x>=0 && x<13 )); then REPLY='apply'
+    elif (( x>=14 && x<25 )); then REPLY='cancel'
+    else return 1; fi
+}
+
+modal_cancel() {
+    notice=$1
+    needs_full=1
+}
+
+# Menu personale MC: condizioni valutate senza eseguire codice shell.
+menu_condition() {
+    local expression=$1 kind arg term negate op='|' result=0 path flag i=0
+    local -a words=()
+    expression=${expression//!/ ! }
+    read -r -a words <<< "$expression"
+    while (( i < ${#words[@]} )); do
+        negate=0
+        while [[ ${words[i]:-} == '!' ]]; do negate=$((1-negate)); ((i+=1)); done
+        kind=${words[i]:-}; arg=${words[i+1]:-}; ((i+=2)); term=0
+        path=$menu_file
+        [[ $kind == [FDT] ]] && path=$other_file
+        case $kind in
+            f|F|d|D)
+                case $kind in f) path=$menu_name;; F) path=$other_name;; d) path=$cwd;; D) path=$other_dir;; esac
+                if (( menu_shell_patterns )); then
+                    # shellcheck disable=SC2053
+                    [[ $path == $arg ]] && term=1
+                else [[ $path =~ $arg ]] && term=1; fi
+                ;;
+            t|T)
+                for ((flag=0; flag<${#arg}; flag++)); do
+                    case ${arg:flag:1} in
+                        n) [[ ! -d $path ]] && term=1;; r) [[ -f $path ]] && term=1;;
+                        d) [[ -d $path ]] && term=1;; l) [[ -L $path ]] && term=1;;
+                        c) [[ -c $path ]] && term=1;; b) [[ -b $path ]] && term=1;;
+                        f) [[ -p $path ]] && term=1;; s) [[ -S $path ]] && term=1;;
+                        x) [[ -x $path ]] && term=1;;
+                        t) if [[ $kind == t ]]; then (( ${#menu_tagged[@]} )) && term=1
+                           else (( ${#other_tagged[@]} )) && term=1; fi;;
+                    esac
+                done
+                ;;
+            x) [[ -x $arg ]] && term=1;;
+            *) return 1;;
+        esac
+        (( negate )) && term=$((1-term))
+        if [[ $op == '&' ]]; then result=$((result && term)); else result=$((result || term)); fi
+        op=${words[i]:-}; ((i+=1))
+        [[ $op == '|' || $op == '&' ]] || break
+    done
+    (( result ))
+}
+
+menu_other_panel() {
+    local cwd cursor scroll filter show_hidden needs_full path
+    local -a entries=()
+    local -A marks=()
+    load_pane "$((1-active_pane))"
+    other_dir=$cwd; other_name=${entries[cursor]##*/}; other_file=${entries[cursor]}
+    [[ $other_file == '..' ]] && other_file="$cwd/.."
+    for path in "${entries[@]}"; do
+        [[ -v marks["$path"] ]] && other_tagged+=("${path##*/}")
+    done
+}
+
+load_user_menu() {
+    local line prefix expression include=1 default=0 idx=-1
+    while IFS= read -r line || [[ -n $line ]]; do
+        [[ $line == \#* ]] && continue
+        if [[ $line == shell_patterns=* ]]; then menu_shell_patterns=${line#*=}; continue; fi
+        if [[ $line =~ ^([+=]+)\??[[:space:]]*(.*)$ ]]; then
+            prefix=${BASH_REMATCH[1]}; expression=${BASH_REMATCH[2]}
+            local matches=0
+            menu_condition "$expression" && matches=1
+            [[ $prefix == *+* ]] && include=$matches
+            [[ $prefix == *=* ]] && default=$matches
+            idx=-1
+        elif [[ $line == [[:space:]]* || -z $line ]]; then
+            (( idx >= 0 )) && menu_scripts[idx]+="$line"$'\n'
+        elif [[ $line =~ ^([^[:space:]])[[:space:]]+(.+)$ ]]; then
+            if (( include )); then
+                idx=${#menu_keys[@]}
+                menu_keys+=("${BASH_REMATCH[1]}"); menu_labels+=("${BASH_REMATCH[2]}"); menu_scripts+=('')
+                (( default && menu_default < 0 )) && menu_default=$idx
+            else idx=-1; fi
+            include=1; default=0
         fi
+    done < "$menu_source"
+}
+
+expand_user_command() {
+    local body=$1 i char rest prompt value quote path
+    local -a values=()
+    menu_script=''; menu_view=0; menu_unmark=0; menu_other_unmark=0
+    for ((i=0; i<${#body}; i++)); do
+        char=${body:i:1}
+        if [[ $char != '%' ]]; then menu_script+=$char; continue; fi
+        ((i+=1)); char=${body:i:1}; quote=1; values=()
+        if [[ $char == [01] ]]; then quote=$char; ((i+=1)); char=${body:i:1}; fi
+        case $char in
+            '%') menu_script+='%'; continue;;
+            '{')
+                rest=${body:i+1}; prompt=${rest%%\}*}
+                if ! ask "$prompt: "; then return 1; fi
+                values=("$REPLY"); ((i+=${#prompt}+1))
+                ;;
+            v)
+                if [[ ${body:i:4} != view ]]; then notice='Macro MC non supportata: %v'; return 1; fi
+                menu_view=1; ((i+=3))
+                if [[ ${body:i+1:1} == '{' ]]; then rest=${body:i+2}; rest=${rest%%\}*}; ((i+=${#rest}+2)); fi
+                continue
+                ;;
+            f|p) values=("$menu_name");; d) values=("$cwd");;
+            F|P) values=("$other_name");; D) values=("$other_dir");;
+            s) values=("${menu_tagged[@]}"); (( ${#values[@]} )) || values=("$menu_name");;
+            S) values=("${other_tagged[@]}"); (( ${#values[@]} )) || values=("$other_name");;
+            t|u) values=("${menu_tagged[@]}"); [[ $char == u ]] && menu_unmark=1;;
+            T|U) values=("${other_tagged[@]}"); [[ $char == U ]] && menu_other_unmark=1;;
+            *) notice="Macro MC non supportata: %$char"; return 1;;
+        esac
+        value=''
+        for path in "${values[@]}"; do
+            if (( quote )); then printf -v rest '%q' "$path"; else rest=$path; fi
+            value+="${value:+ }$rest"
+        done
+        menu_script+=$value
     done
-    if [[ ! $base_mode =~ ^[0-7]{3,4}$ ]]; then
-        notice='Nessun file valido: chmod non modifica i link simbolici.'
-        return
-    fi
-    perms=$((8#$base_mode))
+}
+
+user_menu() {
+    local menu_source=${XDG_CONFIG_HOME:-$HOME/.config}/mc/menu
+    [[ -r $menu_source ]] || menu_source=/etc/mc/mc.menu
+    if [[ ! -r $menu_source ]]; then notice='Menu MC non trovato.'; return; fi
+    local menu_file=${entries[cursor]} menu_name=${entries[cursor]##*/} path key i choice=0 offset=0 capacity focus=0
+    local other_file=$menu_file other_name=$menu_name other_dir=$cwd menu_shell_patterns=1 menu_default=-1
+    local menu_script menu_view menu_unmark menu_other_unmark clicked=-1 click_time=0 now
+    local -a menu_keys=() menu_labels=() menu_scripts=() menu_tagged=() other_tagged=() pager=()
+    [[ $menu_file == '..' ]] && menu_file="$cwd/.."
+    for path in "${entries[@]}"; do
+        [[ -v marks["$path"] ]] && menu_tagged+=("${path##*/}")
+    done
+    if (( dual_pane )); then menu_other_panel; else other_file=$menu_file; fi
+    load_user_menu
+    if (( !${#menu_keys[@]} )); then notice='Nessun comando MC disponibile per la selezione.'; return; fi
+    (( menu_default >= 0 )) && choice=$menu_default
     needs_full=1
     while :; do
-        printf -v new_mode '%04o' "$perms"
-        chmod_dialog "$base_mode" "$new_mode" "$focus" "$digits"
-        if ! input_key; then notice='chmod annullato.'; needs_full=1; return; fi
-        case $KEY in
-            UP) focus=$(((focus+6)%9));;
-            DOWN) focus=$(((focus+3)%9));;
-            LEFT) focus=$(((focus+8)%9));;
-            RIGHT) focus=$(((focus+1)%9));;
-            F3)
-                mask=$((1 << (8-focus)))
-                perms=$((perms ^ mask))
-                digits=''
-                ;;
-            [0-9])
-                if (( ${#digits} < 4 )); then digits+=$KEY; fi
-                ;;
-            ENTER)
-                if [[ -n $digits ]]; then
-                    if [[ ! $digits =~ ^[0-7]{3,4}$ ]]; then
-                        notice='Modo ottale non valido: usa 3 o 4 cifre da 0 a 7.'
-                        needs_full=1
-                        return
-                    fi
-                    mode=$digits
-                else
-                    mode=$new_mode
-                fi
-                break
-                ;;
-            ESC|F10)
-                notice='Modifica permessi annullata.'
-                needs_full=1
-                return
-                ;;
+        modal_frame 'Menu comandi (MC)' 78 24
+        capacity=$((modal_h-6))
+        (( choice < offset )) && offset=$choice
+        (( choice >= offset+capacity )) && offset=$((choice-capacity+1))
+        modal_line 1 "$menu_source" "$CLR_DIALOG_TITLE"
+        for ((i=0; i<capacity && i+offset<${#menu_keys[@]}; i++)); do
+            local style=$CLR_DIALOG
+            (( i+offset == choice && focus == 0 )) && style=$CLR_DIALOG_FOCUS
+            modal_line "$((i+2))" " ${menu_keys[i+offset]}  ${menu_labels[i+offset]}" "$style"
+        done
+        modal_rule "$((modal_h-4))"
+        modal_buttons "$((focus-1))" 'Esegui'
+        modal_line "$((modal_h-2))" 'Frecce/Pg: scegli  Invio: esegui  Esc: annulla'
+        if ! input_key; then needs_full=1; return; fi
+        key=$KEY
+        case $key in
+            UP) focus=0; (( choice>0 )) && ((choice-=1));;
+            DOWN) focus=0; (( choice+1<${#menu_keys[@]} )) && ((choice+=1));;
+            HOME) focus=0; choice=0;; END) focus=0; choice=$((${#menu_keys[@]}-1));;
+            PAGEUP) focus=0; ((choice-=capacity)); ((choice<0)) && choice=0;;
+            PAGEDOWN) focus=0; ((choice+=capacity)); ((choice>=${#menu_keys[@]})) && choice=$((${#menu_keys[@]}-1));;
+            TAB) focus=$(((focus+1)%3));;
+            ESC|F10) modal_cancel 'Menu comandi annullato.'; return;;
+            ENTER) if (( focus == 2 )); then needs_full=1; return; fi; break;;
             MOUSE)
-                # Tre righe di caselle (4..6) nella finestra.
-                local r c
-                r=$((MOUSE_Y-modal_y-4))
-                c=$((MOUSE_X-modal_x))
-                if [[ $MOUSE_ACTION == M ]] && (( MOUSE_BTN == 0 && r>=0 && r<3 && c>=8 && c<37 )); then
-                    if (( c<18 )); then focus=$((r*3))
-                    elif (( c<28 )); then focus=$((r*3+1))
-                    else focus=$((r*3+2))
+                local x=$((MOUSE_X-modal_x)) y=$((MOUSE_Y-modal_y))
+                if (( MOUSE_BTN == 64 )); then focus=0; ((choice>0)) && ((choice-=1))
+                elif (( MOUSE_BTN == 65 )); then focus=0; ((choice+1<${#menu_keys[@]})) && ((choice+=1))
+                elif [[ $MOUSE_ACTION == M && $MOUSE_BTN == 0 ]] && (( x>0 && x<modal_w-1 )); then
+                    if (( y>=2 && y<2+capacity && y-2+offset<${#menu_keys[@]} )); then
+                        choice=$((y-2+offset)); focus=0; now=$(now_millis)
+                        if (( clicked == choice && now-click_time<450 )); then break; fi
+                        clicked=$choice; click_time=$now
+                    elif modal_button_at; then
+                        if [[ $REPLY == apply ]]; then break; fi
+                        needs_full=1; return
                     fi
-                    mask=$((1 << (8-focus)))
-                    perms=$((perms ^ mask))
-                    digits=''
                 fi
+                ;;
+            *)
+                local found=0
+                for i in "${!menu_keys[@]}"; do
+                    if [[ $key == "${menu_keys[i]}" ]]; then choice=$i; found=1; break; fi
+                done
+                (( found )) && break
                 ;;
         esac
     done
     needs_full=1
-    for path in "${targets[@]}"; do
-        if [[ -L $path ]]; then
-            ((failed+=1))
-        elif chmod -- "$mode" "$path" 2>/dev/null; then
-            ((changed+=1))
-        else
-            ((failed+=1))
-        fi
-    done
+    if ! expand_user_command "${menu_scripts[choice]}"; then return; fi
+    (( menu_unmark )) && marks=()
+    if (( menu_other_unmark )); then
+        for key in "${!pane_marks[@]}"; do [[ $key == "$((1-active_pane)):"* ]] && unset 'pane_marks[$key]'; done
+    fi
+    if (( menu_view )); then
+        read -r -a pager <<< "${PAGER:-less}"
+        if command -v "${pager[0]}" >/dev/null 2>&1; then
+            run_program 0 bash -c 'set -o pipefail; bash -c "$1" | "${@:2}"' fm-menu "$menu_script" "${pager[@]}"
+        else run_program 1 bash -c "$menu_script"; fi
+    else run_program 1 bash -c "$menu_script"; fi
+    local -a selected_paths=("${!marks[@]}")
     reload
-    notice="chmod $mode: modificati $changed, non riusciti $failed."
+    for path in "${selected_paths[@]}"; do [[ -e $path || -L $path ]] && marks["$path"]=1; done
 }
 
-chown_dialog() {
-    local current=$1 owner=$2 group=$3 focus=$4
-    modal_frame 'Proprietario e gruppo (chown)'
-    modal_line 2 "Elementi selezionati: ${#targets[@]}"
-    modal_line 3 "Attuale: $current"
-    modal_line 4 'Proprietario:'
-    if (( focus == 0 )); then
-        modal_line 5 "> ${owner:-[invariato]}_" "$CLR_CURSOR"
-    else
-        modal_line 5 "  ${owner:-[invariato]}" "$CLR_PANEL"
-    fi
-    modal_line 6 'Gruppo:'
-    if (( focus == 1 )); then
-        modal_line 7 "> ${group:-[invariato]}_" "$CLR_CURSOR"
-    else
-        modal_line 7 "  ${group:-[invariato]}" "$CLR_PANEL"
-    fi
-    modal_line 8 'Tab / Frecce: cambia campo; Backspace elimina'
-    modal_line 9 'Digita utente:gruppo per compilare entrambi'
-    modal_line 10 'Invio: Applica       Esc: Annulla' "$CLR_TITLE"
-}
-
-chown_items() {
-    local path current owner='' group='' focus=0 key spec
-    local changed=0 failed=0
-    collect
-    if (( ${#targets[@]} == 0 )); then notice='Nessun elemento selezionato.'; return; fi
-    current=$(stat -c '%U:%G' -- "${targets[0]}" 2>/dev/null) || current='sconosciuto'
-    needs_full=1
+rename_dialog() {
+    local original=$1 name=$1 pos=0 selected=1 focus=0 offset=0 width key x y style
     while :; do
-        chown_dialog "$current" "$owner" "$group" "$focus"
-        if ! input_key; then notice='chown annullato.'; needs_full=1; return; fi
+        modal_frame 'Rinomina' 66 12
+        width=$((modal_w-8))
+        (( pos < offset )) && offset=$pos
+        (( pos >= offset+width )) && offset=$((pos-width+1))
+        modal_line 1 'Nome attuale:' "$CLR_DIALOG_TITLE"
+        modal_line 2 "$original"
+        modal_line 4 'Nuovo nome:' "$CLR_DIALOG_TITLE"
+        style=$CLR_DIALOG
+        (( focus == 0 )) && style=$CLR_CURSOR
+        modal_text 5 4 "$width" "${name:offset:width}" "$style"
+        if (( selected && focus == 0 )); then
+            modal_text 5 4 "$(( ${#name}<width ? ${#name} : width ))" "${name:0:width}" "$CLR_DIALOG_FOCUS"
+        fi
+        modal_line 7 'Invio: rinomina  Tab: pulsanti  Esc: annulla'
+        modal_rule 8
+        modal_buttons "$((focus-1))" 'Rinomina'
+        if (( focus == 0 )); then
+            printf '\033[%d;%dH\033[?25h' "$((modal_y+5))" "$((modal_x+4+pos-offset))" >&9
+        fi
+        if ! input_key; then
+            printf '\033[?25l' >&9
+            modal_cancel 'Rinomina annullata.'; return 1
+        fi
+        printf '\033[?25l' >&9
         key=$KEY
         case $key in
-            UP|DOWN|LEFT|RIGHT|$'\t')
-                focus=$((1-focus))
+            TAB) focus=$(((focus+1)%3));;
+            ESC|F10) modal_cancel 'Rinomina annullata.'; return 1;;
+            ENTER)
+                if (( focus == 2 )); then modal_cancel 'Rinomina annullata.'; return 1; fi
+                REPLY=$name; needs_full=1; return 0
+                ;;
+            LEFT)
+                if (( focus == 0 )); then
+                    if (( selected )); then pos=0; elif (( pos>0 )); then ((pos-=1)); fi
+                    selected=0
+                fi
+                ;;
+            RIGHT)
+                if (( focus == 0 )); then
+                    if (( selected )); then pos=${#name}; elif (( pos<${#name} )); then ((pos+=1)); fi
+                    selected=0
+                fi
+                ;;
+            HOME) pos=0; selected=0;;
+            END) pos=${#name}; selected=0;;
+            BACK|DELETE)
+                if (( focus == 0 )); then
+                    if (( selected )); then name=''; pos=0
+                    elif [[ $key == BACK ]] && (( pos>0 )); then
+                        name="${name:0:pos-1}${name:pos}"; ((pos-=1))
+                    elif [[ $key == DELETE ]]; then name="${name:0:pos}${name:pos+1}"
+                    fi
+                    selected=0
+                fi
+                ;;
+            $'\025') if (( focus == 0 )); then name=''; pos=0; selected=0; fi;;
+            MOUSE)
+                x=$((MOUSE_X-modal_x)); y=$((MOUSE_Y-modal_y))
+                if [[ $MOUSE_ACTION == M && $MOUSE_BTN == 0 ]]; then
+                    if (( y == 5 && x>=4 && x<modal_w-4 )); then
+                        focus=0; selected=0; pos=$((offset+x-4))
+                        (( pos>${#name} )) && pos=${#name}
+                    elif modal_button_at; then
+                        if [[ $REPLY == apply ]]; then
+                            focus=1; PENDING_CHAR=$'\r'
+                        else
+                            modal_cancel 'Rinomina annullata.'; return 1
+                        fi
+                    fi
+                fi
+                ;;
+            *)
+                [[ $key == F3 ]] && key=' '
+                if (( focus == 0 )) && [[ ${#key} == 1 && $key == [[:print:]] ]]; then
+                    if (( selected )); then name=''; pos=0; offset=0; selected=0; fi
+                    name="${name:0:pos}$key${name:pos}"; ((pos+=1))
+                elif [[ $key == ' ' ]] && (( focus>0 )); then PENDING_CHAR=$'\r'
+                fi
+                ;;
+        esac
+    done
+}
+
+attributes_dialog() {
+    local row col i mask check label cell_x style column idx count start name
+    local list_top=9 bottom list_x
+    modal_frame 'Permessi e proprietario' 78 24
+    bottom=$((modal_h-6))
+    # Sui terminali bassi Tab alterna la griglia e le liste nella stessa finestra.
+    if (( modal_h < 20 )); then list_top=3; fi
+    modal_line 1 "File: ${targets[0]##*/} (${#targets[@]} selezionati)"
+    modal_line 2 "Modo: ${digits:-$new_mode}  ${owner:-${current%:*}}:${group:-${current#*:}}" "$CLR_DIALOG_TITLE"
+    if (( modal_h >= 20 || focus == 0 || focus >= 3 )); then
+        modal_line 3 '           Lett.  Scritt. Esec.'
+        for ((row=0; row<3; row++)); do
+            case $row in 0) label='Utente';; 1) label='Gruppo';; 2) label='Altri';; esac
+            modal_line "$((4+row))" "$label"
+            for ((col=0; col<3; col++)); do
+                i=$((row*3+col)); mask=$((1 << (8-i)))
+                check=' '; (( perms & mask )) && check='x'
+                cell_x=$((13+col*7)); style=$CLR_DIALOG
+                (( focus == 0 && i == cell )) && style=$CLR_DIALOG_FOCUS
+                modal_text "$((4+row))" "$cell_x" 3 "[$check]" "$style"
+            done
+        done
+        modal_line 7 "Ottale: ${digits:-$new_mode} (digita 755 o 0644)" "$CLR_DIALOG_TITLE"
+    fi
+    list_count=$((bottom-list_top-1)); list_w=$(((modal_w-6)/2))
+    list_y=$((list_top+1))
+    if (( modal_h >= 20 || focus == 1 || focus == 2 )); then
+        for ((column=0; column<2; column++)); do
+            list_x=$((2+column*(list_w+1)))
+            if (( column == 0 )); then
+                modal_box "$list_x" "$list_w" 'Utenti' "$bottom" "$list_top"
+                idx=$user_index; count=${#user_names[@]}
+            else
+                modal_box "$list_x" "$list_w" 'Gruppi' "$bottom" "$list_top"
+                idx=$group_index; count=${#group_names[@]}
+            fi
+            start=$((idx-list_count/2))
+            (( start > count-list_count )) && start=$((count-list_count))
+            (( start < 0 )) && start=0
+            if (( column == 0 )); then user_start=$start; else group_start=$start; fi
+            for ((i=0; i<list_count && start+i<count; i++)); do
+                if (( column == 0 )); then name=${user_names[start+i]}; else name=${group_names[start+i]}; fi
+                style=$CLR_DIALOG
+                (( start+i == idx && focus == column+1 )) && style=$CLR_DIALOG_FOCUS
+                modal_text "$((list_y+i))" "$((list_x+1))" "$((list_w-2))" " $name" "$style"
+            done
+            (( start > 0 )) && modal_text "$list_y" "$((list_x+list_w-1))" 1 '^'
+            (( start+list_count < count )) && modal_text "$((bottom-1))" "$((list_x+list_w-1))" 1 'v'
+        done
+    fi
+    modal_line "$((modal_h-5))" 'Tab: permessi / utente / gruppo / pulsanti'
+    # Lascia spazio alla griglia nei terminali di sole 12 righe.
+    (( modal_h >= 14 || focus == 1 || focus == 2 )) && modal_rule "$((modal_h-4))"
+    modal_buttons "$((focus-3))"
+}
+
+attributes_items() {
+    local path current owner='' group='' focus=0 cell=0 key spec='' mode='' digits='' new_mode
+    local base_mode perms i failed=0 chmod_changed=0 chown_changed=0
+    local chmod_dirty=0 file_error='' summary=''
+    local user_index=0 group_index=0 user_start=0 group_start=0 list_count list_w list_y
+    local -a user_names=() group_names=()
+    collect
+    if (( ${#targets[@]} == 0 )); then notice='Nessun elemento selezionato.'; return; fi
+    base_mode=$(stat -c %a -- "${targets[0]}" 2>/dev/null) || return
+    current=$(stat -c '%U:%G' -- "${targets[0]}" 2>/dev/null) || return
+    perms=$((8#$base_mode))
+    mapfile -t user_names < <(getent passwd | cut -d: -f1 | LC_ALL=C sort -u)
+    mapfile -t group_names < <(getent group | cut -d: -f1 | LC_ALL=C sort -u)
+    (( ${#user_names[@]} )) || user_names=("${current%:*}")
+    (( ${#group_names[@]} )) || group_names=("${current#*:}")
+    for i in "${!user_names[@]}"; do [[ ${user_names[i]} == "${current%:*}" ]] && user_index=$i; done
+    for i in "${!group_names[@]}"; do [[ ${group_names[i]} == "${current#*:}" ]] && group_index=$i; done
+    needs_full=1
+    while :; do
+        printf -v new_mode '%04o' "$perms"
+        attributes_dialog
+        if ! input_key; then modal_cancel 'Modifica attributi annullata.'; return; fi
+        key=$KEY
+        case $key in
+            TAB) focus=$(((focus+1)%5));;
+            UP|DOWN|LEFT|RIGHT|PAGEUP|PAGEDOWN|HOME|END)
+                if (( focus == 0 )); then
+                    case $key in
+                        UP) cell=$(((cell+6)%9));;
+                        DOWN) cell=$(((cell+3)%9));;
+                        LEFT) cell=$(((cell+8)%9));;
+                        RIGHT) cell=$(((cell+1)%9));;
+                    esac
+                elif [[ $key == LEFT || $key == RIGHT ]]; then
+                    if [[ $key == LEFT ]]; then focus=$(((focus+4)%5)); else focus=$(((focus+1)%5)); fi
+                elif (( focus == 1 || focus == 2 )); then
+                    local index count step=1
+                    if (( focus == 1 )); then index=$user_index; count=${#user_names[@]}
+                    else index=$group_index; count=${#group_names[@]}; fi
+                    case $key in PAGEUP|PAGEDOWN) step=$list_count;; esac
+                    case $key in
+                        UP|PAGEUP) ((index-=step));;
+                        DOWN|PAGEDOWN) ((index+=step));;
+                        HOME) index=0;;
+                        END) index=$((count-1));;
+                    esac
+                    (( index < 0 )) && index=0
+                    (( index >= count )) && index=$((count-1))
+                    if (( focus == 1 )); then user_index=$index; owner=${user_names[index]}
+                    else group_index=$index; group=${group_names[index]}; fi
+                fi
+                ;;
+            F3)
+                if (( focus == 0 )); then
+                    perms=$((perms ^ (1 << (8-cell)))); digits=''; chmod_dirty=1
+                elif (( focus >= 3 )); then PENDING_CHAR=$'\r'; fi
                 ;;
             BACK)
-                if (( focus==0 )); then owner=${owner%?}; else group=${group%?}; fi
+                case $focus in 0) digits=${digits%?};; 1) owner=${owner%?};; 2) group=${group%?};; esac
                 ;;
-            ':')
-                focus=1
-                ;;
+            ':') focus=2;;
             ENTER)
-                if [[ -z $owner && -z $group ]]; then
-                    notice='Nessun proprietario o gruppo specificato.'
-                    needs_full=1
-                    return
+                if (( focus == 4 )); then modal_cancel 'Modifica attributi annullata.'; return; fi
+                if [[ -n $digits && ! $digits =~ ^[0-7]{3,4}$ ]]; then
+                    notice='Modo ottale non valido: usa 3 o 4 cifre da 0 a 7.'; needs_full=1; return
                 fi
-                spec=$owner
-                [[ -n $group ]] && spec="$owner:$group"
+                if (( chmod_dirty )) || [[ -n $digits ]]; then mode=${digits:-$new_mode}; fi
+                spec=$owner; [[ -n $group ]] && spec="$owner:$group"
                 break
                 ;;
             ESC|F10)
-                notice='Modifica proprietario annullata.'
-                needs_full=1
-                return
+                modal_cancel 'Modifica attributi annullata.'; return
                 ;;
             MOUSE)
                 if [[ $MOUSE_ACTION == M && $MOUSE_BTN == 0 ]]; then
-                    if (( MOUSE_Y == modal_y + 5 )); then focus=0
-                    elif (( MOUSE_Y == modal_y + 7 )); then focus=1
+                    local x=$((MOUSE_X-modal_x)) y=$((MOUSE_Y-modal_y)) index
+                    if (( y>=4 && y<=6 && x>=13 && x<30 && (x-13)%7<3 && (modal_h>=20 || focus==0 || focus>=3) )); then
+                        cell=$(((y-4)*3+(x-13)/7)); focus=0
+                        perms=$((perms ^ (1 << (8-cell)))); digits=''; chmod_dirty=1
+                    elif (( y>=list_y && y<modal_h-6 && (modal_h>=20 || focus==1 || focus==2) )); then
+                        if (( x>2 && x<2+list_w-1 )); then
+                            index=$((user_start+y-list_y))
+                            if (( index<${#user_names[@]} )); then focus=1; user_index=$index; owner=${user_names[index]}; fi
+                        elif (( x>3+list_w && x<2+2*list_w )); then
+                            index=$((group_start+y-list_y))
+                            if (( index<${#group_names[@]} )); then focus=2; group_index=$index; group=${group_names[index]}; fi
+                        fi
+                    elif modal_button_at; then
+                        if [[ $REPLY == apply ]]; then
+                            focus=3; PENDING_CHAR=$'\r'
+                        else
+                            modal_cancel 'Modifica attributi annullata.'; return
+                        fi
                     fi
                 fi
                 ;;
             *)
                 if [[ $key == [[:print:]] && ${#key} == 1 && $key != [[:space:]] ]]; then
-                    if (( focus==0 )); then
-                        (( ${#owner} < 128 )) && owner+=$key
-                    else
-                        (( ${#group} < 128 )) && group+=$key
-                    fi
+                    case $focus in
+                        0) if [[ $key == [0-9] ]] && (( ${#digits}<4 )); then digits+=$key; fi;;
+                        1) (( ${#owner}<128 )) && owner+=$key;;
+                        2) (( ${#group}<128 )) && group+=$key;;
+                    esac
                 fi
                 ;;
         esac
     done
     needs_full=1
-    # Chiamata diretta senza sudo né shell; eventuali errori per permessi
-    # sono riportati dal contatore, senza richiedere password nella TUI.
+    # chown puo' azzerare setuid/setgid: applica chmod dopo il proprietario.
     for path in "${targets[@]}"; do
-        if chown -- "$spec" "$path" 2>/dev/null; then
-            ((changed+=1))
-        else
-            ((failed+=1))
+        if [[ -n $spec ]]; then
+            if file_command chown -- "$spec" "$path"; then ((chown_changed+=1)); else ((failed+=1)); fi
+        fi
+        if [[ -n $mode ]]; then
+            if [[ -L $path ]]; then ((failed+=1))
+            elif file_command chmod -- "$mode" "$path"; then ((chmod_changed+=1))
+            else ((failed+=1)); fi
         fi
     done
+    [[ -n $spec ]] && summary="chown $spec: modificati $chown_changed. "
+    [[ -n $mode ]] && summary+="chmod $mode: modificati $chmod_changed. "
     reload
-    notice="chown $spec: modificati $changed, non riusciti $failed."
+    notice="${file_error:+$file_error }${summary:-Nessuna modifica. }Non riusciti: $failed."
 }
 
 create_symlink() {
-    local path=${entries[cursor]} name
+    local path=${entries[cursor]} name file_error=''
     if [[ $path == '..' ]]; then
         notice='Seleziona un file o una directory per il link.'
         return
@@ -1042,37 +1478,399 @@ create_symlink() {
     fi
     # Destinazione assoluta: il link resta valido dopo aver spostato
     # il collegamento in un altra directory (finche il target esiste).
-    if ln -s -- "$path" "$cwd/$name" 2>/dev/null; then
+    if file_command ln -s -- "$path" "$cwd/$name"; then
         reload
         notice="Creato link $name -> $path"
     else
-        notice='Creazione link non riuscita (permessi?).'
+        notice="Creazione link non riuscita: $file_error"
     fi
+}
+
+# Le connessioni GVfs espongono un percorso FUSE alle normali operazioni di fm.
+# REPLY riceve la radice del mount per distinguere protocollo e trasferimenti interni.
+is_remote_path() {
+    local root
+    for root in "${!remote_labels[@]}"; do
+        if [[ $1 == "$root" || $1 == "$root/"* ]]; then REPLY=$root; return 0; fi
+    done
+    return 1
+}
+
+display_path() {
+    local root
+    REPLY=$1
+    if [[ $1 == "$connections_root" ]]; then REPLY='Connessioni'; return; fi
+    for root in "${!remote_labels[@]}"; do
+        if [[ $1 == "$root" || $1 == "$root/"* ]]; then
+            REPLY="${remote_labels[$root]}:${1#"$root"}"
+            [[ $1 == "$root" ]] && REPLY+='/'
+            return
+        fi
+    done
+}
+
+connection_dialog() {
+    local protocol=$1 focus=0 replace_address=1 key value style width
+    remote_password=''
+    while :; do
+        modal_frame "Connessione ${protocol^^}" 70 14
+        modal_line 1 'Indirizzo (utente@host oppure utente@host:porta):' "$CLR_DIALOG_TITLE"
+        width=$((modal_w-8))
+        style=$CLR_DIALOG; (( focus == 0 )) && style=$CLR_CURSOR
+        value=$remote_address
+        (( ${#value}>width )) && value=${value: -width}
+        modal_text 2 4 "$width" "$value" "$style"
+        modal_line 4 'Password:' "$CLR_DIALOG_TITLE"
+        printf -v value '%*s' "${#remote_password}" ''; value=${value// /*}
+        style=$CLR_DIALOG; (( focus == 1 )) && style=$CLR_CURSOR
+        (( ${#value}>width )) && value=${value: -width}
+        modal_text 5 4 "$width" "$value" "$style"
+        if [[ $protocol == ssh ]]; then
+            modal_line 7 'Password vuota: usa le chiavi SSH.'
+        else
+            modal_line 7 'La password viene usata solo per questa connessione.'
+        fi
+        (( modal_h >= 14 )) && modal_line 9 'Tab: cambia campo  Invio: connetti  Esc: annulla'
+        modal_rule "$((modal_h-4))"
+        modal_buttons "$((focus-2))" 'Connetti'
+        if ! input_key; then modal_cancel 'Connessione annullata.'; return 1; fi
+        key=$KEY
+        case $key in
+            TAB) focus=$(((focus+1)%4));;
+            UP|DOWN) focus=$((1-(focus%2)));;
+            ESC|F10) modal_cancel 'Connessione annullata.'; return 1;;
+            ENTER)
+                if (( focus == 3 )); then modal_cancel 'Connessione annullata.'; return 1; fi
+                if (( focus == 0 )); then focus=1; continue; fi
+                if [[ ! $remote_address =~ ^[^:@/[:space:]]+@[^/@[:space:]]+$ ]]; then
+                    modal_cancel 'Indirizzo non valido: usa utente@host[:porta].'; return 1
+                fi
+                needs_full=1; return 0
+                ;;
+            BACK)
+                if (( focus == 0 )); then
+                    if (( replace_address )); then remote_address=''; else remote_address=${remote_address%?}; fi
+                    replace_address=0
+                elif (( focus == 1 )); then remote_password=${remote_password%?}; fi
+                ;;
+            HOME|END|LEFT|RIGHT) replace_address=0;;
+            $'\025')
+                if (( focus == 0 )); then remote_address=''; replace_address=0
+                elif (( focus == 1 )); then remote_password=''; fi
+                ;;
+            MOUSE)
+                if [[ $MOUSE_ACTION == M && $MOUSE_BTN == 0 ]]; then
+                    local x=$((MOUSE_X-modal_x)) y=$((MOUSE_Y-modal_y))
+                    if (( x>=4 && x<modal_w-4 && y==2 )); then focus=0
+                    elif (( x>=4 && x<modal_w-4 && y==5 )); then focus=1
+                    elif modal_button_at; then
+                        if [[ $REPLY == apply ]]; then focus=2; PENDING_CHAR=$'\r'
+                        else modal_cancel 'Connessione annullata.'; return 1; fi
+                    fi
+                fi
+                ;;
+            *)
+                [[ $key == F3 ]] && key=' '
+                if [[ ${#key} == 1 && $key == [[:print:]] ]]; then
+                    if (( focus == 0 && ${#remote_address}<200 )); then
+                        if (( replace_address )); then remote_address=''; replace_address=0; fi
+                        remote_address+=$key
+                    elif (( focus == 1 && ${#remote_password}<200 )); then remote_password+=$key; fi
+                fi
+                ;;
+        esac
+    done
+}
+
+remote_mount() {
+    /usr/bin/python3 - "$@" <<'PY'
+import os
+import pathlib
+import sys
+from urllib.parse import quote, urlsplit
+
+protocol, address, password_fd, result_file = sys.argv[1:]
+password = os.fdopen(int(password_fd)).read()
+
+def fail(message):
+    pathlib.Path(result_file).write_text(message + "\n")
+    print(message, file=sys.stderr)
+
+try:
+    from gi.repository import Gio, GLib
+except ImportError:
+    fail("Supporto remoto assente: servono python3-gi, gvfs-backends e gvfs-fuse.")
+    sys.exit(1)
+
+try:
+    user, host = address.rsplit("@", 1)
+    if not user or any(c in user for c in ":/@?#") or any(c.isspace() for c in address):
+        raise ValueError()
+    scheme = "sftp" if protocol == "ssh" else "ftp"
+    parsed = urlsplit(f"{scheme}://{quote(user, safe='')}@{host}/")
+    if not parsed.hostname or parsed.hostname.startswith("-") or parsed.path != "/" or parsed.query or parsed.fragment:
+        raise ValueError()
+    if parsed.port is not None and not 1 <= parsed.port <= 65535:
+        raise ValueError()
+    location = Gio.File.new_for_uri(parsed.geturl())
+except (ValueError, GLib.Error):
+    fail("Indirizzo non valido: usa utente@host[:porta].")
+    sys.exit(1)
+
+operation = Gio.MountOperation()
+operation.set_password_save(Gio.PasswordSave.NEVER)
+loop = GLib.MainLoop()
+cancellable = Gio.Cancellable()
+status = 1
+attempted = False
+auth_error = ""
+
+def ask_password(op, message, default_user, default_domain, flags):
+    global attempted, auth_error
+    if attempted or (protocol == "ssh" and not password):
+        auth_error = "Autenticazione non riuscita." if attempted else "Chiave SSH non disponibile: inserisci la password."
+        op.reply(Gio.MountOperationResult.ABORTED)
+        return
+    attempted = True
+    op.set_anonymous(False)
+    op.set_username(user)
+    op.set_domain(default_domain or "")
+    op.set_password(password)
+    op.set_password_save(Gio.PasswordSave.NEVER)
+    op.reply(Gio.MountOperationResult.HANDLED)
+
+def ask_question(op, message, choices):
+    print(message)
+    for index, choice in enumerate(choices, 1):
+        print(f"{index}. {choice}")
+    print("Scelta (vuoto annulla): ", end="", flush=True)
+    try:
+        with open("/dev/tty") as tty:
+            answer = int(tty.readline().strip()) - 1
+        if not 0 <= answer < len(choices):
+            raise ValueError()
+        op.set_choice(answer)
+        op.reply(Gio.MountOperationResult.HANDLED)
+    except (ValueError, OSError, KeyboardInterrupt):
+        op.reply(Gio.MountOperationResult.ABORTED)
+
+def mounted(file, result):
+    global status
+    try:
+        try:
+            file.mount_enclosing_volume_finish(result)
+        except GLib.Error as error:
+            if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.ALREADY_MOUNTED):
+                raise
+        root = file.find_enclosing_mount(None).get_root().get_path()
+        if not root or not os.path.isdir(root):
+            raise RuntimeError("Percorso remoto non disponibile: verifica gvfs-fuse.")
+        pathlib.Path(result_file).write_text(root + "\n")
+        status = 0
+    except (GLib.Error, RuntimeError, OSError) as error:
+        fail(auth_error or getattr(error, "message", str(error)))
+    loop.quit()
+
+def timed_out():
+    cancellable.cancel()
+    fail("Tempo di connessione scaduto.")
+    loop.quit()
+    return False
+
+operation.connect("ask-password", ask_password)
+operation.connect("ask-question", ask_question)
+GLib.timeout_add_seconds(30, timed_out)
+location.mount_enclosing_volume(Gio.MountMountFlags.NONE, operation, cancellable, mounted)
+try:
+    loop.run()
+except KeyboardInterrupt:
+    fail("Connessione annullata.")
+sys.exit(status)
+PY
+}
+
+# Tre righe per voce: protocollo, indirizzo, nome. Il nome non e' mai un percorso.
+save_connection() {
+    local protocol=$1 address=$2 name=${3:-} id file saved old_protocol='' old_address=''
+    id=$(printf '%s\0%s' "$protocol" "$address" | sha256sum); id=${id%% *}
+    file="$connections_dir/$id"
+    if [[ -z $name && -r $file ]]; then
+        { IFS= read -r old_protocol; IFS= read -r old_address; IFS= read -r name; } < "$file" || name=''
+        [[ $old_protocol == "$protocol" && $old_address == "$address" ]] || name=''
+    fi
+    [[ -n $name ]] || name="${protocol^^} $address"
+    saved=$(umask 077; mkdir -p -- "$connections_dir" && mktemp "$connections_dir/.saved.XXXXXX") || return 1
+    if printf '%s\n%s\n%s\n' "$protocol" "$address" "$name" > "$saved" && mv -T -- "$saved" "$file"; then
+        return 0
+    fi
+    rm -f -- "$saved"
+    return 1
+}
+
+load_saved_connections() {
+    local file id protocol address name
+    connection_names=(); connection_protocols=(); connection_addresses=()
+    # Importa una volta gli ultimi indirizzi della versione precedente.
+    if [[ ! -d $connections_dir ]]; then
+        for protocol in ssh ftp; do
+            file="${connections_dir%/*}/last-$protocol"
+            if [[ -r $file ]] && IFS= read -r address < "$file" &&
+               [[ $address =~ ^[^:@/[:space:]]+@[^/@[:space:]]+$ ]]; then
+                save_connection "$protocol" "$address" || :
+            fi
+        done
+    fi
+    for file in "$connections_dir"/*; do
+        id=${file##*/}
+        [[ $id =~ ^[0-9a-f]{64}$ && -f $file ]] || continue
+        { IFS= read -r protocol && IFS= read -r address && IFS= read -r name; } < "$file" || continue
+        [[ $protocol == ssh || $protocol == ftp ]] || continue
+        [[ -n $name && $address =~ ^[^:@/[:space:]]+@[^/@[:space:]]+$ ]] || continue
+        connection_names["$id"]=$name
+        connection_protocols["$id"]=$protocol
+        connection_addresses["$id"]=$address
+        entries+=("profile:$id")
+    done
+}
+
+rename_saved_connection() {
+    local entry=${entries[cursor]} id name protocol address
+    id=${entry#profile:}
+    if [[ $entry != profile:* || ! -v connection_names["$id"] ]]; then
+        notice='Seleziona una connessione salvata.'; return
+    fi
+    protocol=${connection_protocols[$id]}; address=${connection_addresses[$id]}
+    if ! rename_dialog "${connection_names[$id]}"; then return; fi
+    name=$REPLY
+    if [[ -z $name ]]; then notice='Nome non valido.'; return; fi
+    if save_connection "$protocol" "$address" "$name"; then
+        reload
+        notice="Connessione rinominata: $name"
+    else notice='Impossibile salvare il nome della connessione.'; fi
+}
+
+delete_saved_connection() {
+    local entry=${entries[cursor]} id
+    id=${entry#profile:}
+    if [[ $entry != profile:* || ! -v connection_names["$id"] ]]; then
+        notice='Seleziona una connessione salvata.'; return
+    fi
+    if ! ask 'Eliminare connessione? s/N: '; then return; fi
+    if [[ $REPLY != [sSyY] ]]; then notice='Eliminazione annullata.'; return; fi
+    if rm -f -- "$connections_dir/$id"; then
+        reload
+        notice='Connessione eliminata.'
+    else notice='Impossibile eliminare la connessione salvata.'; fi
+}
+
+connect_remote() {
+    local protocol=$1 remote_address=${2:-} remote_password='' password_fd result mount_path status
+    local profile_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm
+    if [[ -z $remote_address && -r $profile_dir/last-$protocol ]]; then
+        IFS= read -r remote_address < "$profile_dir/last-$protocol"
+    fi
+    if ! connection_dialog "$protocol"; then return; fi
+    result=$(mktemp) || return
+    local run_program_label="Connessione ${protocol^^}"
+    exec {password_fd}< <(printf '%s' "$remote_password")
+    trap ':' INT
+    run_program 0 remote_mount "$protocol" "$remote_address" "$password_fd" "$result"
+    status=$?
+    trap 'exit 130' INT
+    exec {password_fd}<&-
+    unset remote_password
+    IFS= read -r mount_path < "$result" || :
+    rm -f -- "$result"
+    if (( status != 0 )); then
+        notice="Connessione non riuscita: ${mount_path:-annullata}."
+        return
+    fi
+    remote_labels["$mount_path"]="${protocol^^} $remote_address"
+    remote_protocols["$mount_path"]=$protocol
+    if ! change_directory "$mount_path"; then return; fi
+    local saved
+    if saved=$(umask 077; mkdir -p -- "$profile_dir" && mktemp "$profile_dir/.last-$protocol.XXXXXX"); then
+        if printf '%s\n' "$remote_address" > "$saved" && mv -T -- "$saved" "$profile_dir/last-$protocol"; then
+            notice="Connesso: ${protocol^^} $remote_address"
+        else
+            rm -f -- "$saved"
+            notice="Connesso; impossibile ricordare l'indirizzo."
+        fi
+    fi
+    if ! save_connection "$protocol" "$remote_address"; then
+        notice='Connesso; impossibile salvare la connessione.'
+    fi
+}
+
+change_directory() {
+    local destination key path i saved_focus
+    if [[ $1 == "$connections_root" ]]; then destination=$connections_root
+    elif ! destination=$(cd -P -- "$1" 2>/dev/null && pwd -P); then
+        notice='Impossibile entrare nella directory.'
+        return 1
+    fi
+    key="$active_pane:$cwd"
+    directory_focus["$key"]=${entries[cursor]}
+    directory_scroll["$key"]=$scroll
+    for key in "${!directory_marks[@]}"; do
+        if [[ $key == "$active_pane:"* && ${directory_marks[$key]} == "$cwd" ]]; then
+            unset 'directory_marks[$key]'
+        fi
+    done
+    for path in "${!marks[@]}"; do directory_marks["$active_pane:$path"]=$cwd; done
+    cwd=$destination; filter=''; filter_editing=0; cursor=1; scroll=0
+    [[ $cwd == "$connections_root" ]] && cursor=0
+    reload
+    key="$active_pane:$cwd"
+    saved_focus=${directory_focus[$key]:-}
+    scroll=${directory_scroll[$key]:-0}
+    for i in "${!entries[@]}"; do
+        path=${entries[i]}
+        [[ $path == "$saved_focus" ]] && cursor=$i
+        [[ -v directory_marks["$active_pane:$path"] ]] && marks["$path"]=1
+    done
+    sync_scroll
+    display_path "$cwd"
+    notice="Directory: $REPLY"
+}
+
+go_parent() {
+    local previous=$cwd i
+    [[ $cwd == "$connections_root" ]] && return 0
+    if [[ $cwd == / || -v remote_labels["$cwd"] ]]; then change_directory "$connections_root"; return; fi
+    if ! change_directory "$cwd/.."; then return; fi
+    for i in "${!entries[@]}"; do
+        if [[ ${entries[i]} == "$previous" ]]; then cursor=$i; break; fi
+    done
+    sync_scroll
 }
 
 enter_dir() {
     local path=${entries[cursor]}
-    if [[ $path == '..' ]]; then
-        cwd=$(cd -P -- "$cwd/.." && pwd -P)
+    if [[ $cwd == "$connections_root" ]]; then
+        case $path in
+            local) change_directory /;;
+            ssh|ftp) connect_remote "$path";;
+            profile:*)
+                local id=${path#profile:}
+                if [[ -v connection_protocols["$id"] ]]; then
+                    connect_remote "${connection_protocols[$id]}" "${connection_addresses[$id]}"
+                else notice='Connessione salvata non disponibile.'; fi
+                ;;
+        esac
+    elif [[ $path == '..' ]]; then
+        go_parent
     elif [[ -d $path ]]; then
-        if ! cwd=$(cd -P -- "$path" 2>/dev/null && pwd -P); then
-            notice='Impossibile entrare nella directory.'
-            return
-        fi
+        change_directory "$path"
     elif [[ -f $path && -x $path ]]; then
         run_executable
-        return
     else
         notice="Non e' una directory o un file eseguibile."
-        return
     fi
-    cursor=1; scroll=0
-    reload
-    notice="Directory: $cwd"
 }
 
 handle_mouse() {
-    local idx i x y now path relx
+    local idx i x y now path
     x=$MOUSE_X
     y=$MOUSE_Y
     if (( dual_pane && y >= items_y && y < items_y+visible )); then
@@ -1126,8 +1924,46 @@ handle_mouse() {
 }
 
 perform_key() {
+    if [[ $cwd == "$connections_root" ]]; then
+        case $1 in
+            F2) rename_saved_connection; return 0;;
+            F8) delete_saved_connection; return 0;;
+            UP|DOWN|LEFT|RIGHT|BACK|HOME|END|PAGEUP|PAGEDOWN|ENTER|TAB|F10|ESC|k|j|h|l|r|R|q|Q) ;;
+            *) notice='Scegli Questo PC, SSH o FTP.'; return 0;;
+        esac
+    fi
+    if (( filter_editing )); then
+        local changed=0
+        case $1 in
+            ESC) clear_filter; notice='Filtro rimosso.'; return 0;;
+            ENTER|RIGHT)
+                if [[ -n $filter ]] && (( ${#entries[@]} <= 1 )); then
+                    notice='Nessuna corrispondenza: modifica il filtro o premi Esc.'
+                    return 0
+                fi
+                filter_editing=0
+                ;;
+            BACK) filter=${filter%?}; changed=1;;
+            FILTER) filter=''; changed=1;;
+            UP|DOWN|PAGEUP|PAGEDOWN|HOME|END) ;;
+            *)
+                if [[ ${#1} == 1 && $1 == [[:print:]] ]]; then
+                    (( ${#filter} < 200 )) && filter+=$1
+                    changed=1
+                else
+                    filter_editing=0
+                fi
+                ;;
+        esac
+        if (( changed )); then
+            cursor=1; scroll=0
+            reload
+            notice="Filtro: ${filter:-tutti} | Invio apre, Esc annulla."
+            return 0
+        fi
+    fi
     case $1 in
-        ENTER|RIGHT|l|F2|F3|F4|F5|F6|F7|F8|CHMOD|CHOWN|SYMLINK) clear_filter;;
+        ENTER|RIGHT|l|F1|F2|F3|F4|F5|F6|F7|F8|ATTRIBUTES|SYMLINK) clear_filter;;
     esac
     case $1 in
         UP|k) ((cursor>0)) && ((cursor-=1));;
@@ -1137,7 +1973,7 @@ perform_key() {
         HOME) cursor=0;;
         END) cursor=$((${#entries[@]}-1));;
         ENTER|RIGHT|l) enter_dir;;
-        LEFT|h|BACK) cwd=$(cd -P -- "$cwd/.." && pwd -P); cursor=1; scroll=0; reload;;
+        LEFT|h|BACK) go_parent;;
         TAB) switch_pane;;
         FILTER) filter_items;;
         HIDDEN)
@@ -1147,6 +1983,7 @@ perform_key() {
             if (( show_hidden )); then notice='File nascosti visibili.'
             else notice='File nascosti non visibili.'; fi
             ;;
+        F1) user_menu;;
         F2) rename_item;;
         F3) select_current;;
         F4) edit_item;;
@@ -1154,13 +1991,12 @@ perform_key() {
         F6) transfer_items move;;
         F7) new_dir;;
         F8) delete_items;;
-        CHMOD) chmod_items;;
-        CHOWN) chown_items;;
+        ATTRIBUTES) attributes_items;;
         SYMLINK) create_symlink;;
-        BAD_CHORD) notice='Ctrl+X: usare C per permessi, O per proprietario/gruppo.';;
+        BAD_CHORD) notice='Ctrl+X: C per attributi, S per link simbolico.';;
         r|R) reload; notice='Elenco aggiornato.';;
-        ESC) notice='Premi q per uscire.';;
-        F10|q|Q) return 1;;
+        ESC) notice='Premi F10 per uscire.';;
+        F10) return 1;;
         *) ;;
     esac
     return 0
@@ -1176,7 +2012,7 @@ while :; do
     fi
     if (( resized )); then resized=0; draw; fi
     if (( rows < 12 || cols < 35 )); then
-        [[ $KEY == q || $KEY == Q ]] && break
+        [[ $KEY == F10 ]] && break
         continue
     fi
     if [[ $KEY == MOUSE ]]; then
