@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import fcntl
+import json
+import shutil
+import sys
 import os
 import pathlib
 import pty
@@ -32,6 +35,27 @@ LEFT = b"\x1b[D"
 ENTER = b"\r"
 
 
+# Evita l'avvio di applicazioni personali; mount e gli altri comandi GIO restano reali.
+OPENER_STUB = tempfile.TemporaryDirectory(prefix="fm-test-opener-")
+_opener = pathlib.Path(OPENER_STUB.name) / "gio"
+_opener.write_text(f"#!{sys.executable}\n" + r"""import json, os, sys
+if sys.argv[1:2] != ['open']:
+    real_gio = REAL_GIO
+    if real_gio:
+        os.execv(real_gio, [real_gio, *sys.argv[1:]])
+    sys.exit(127)
+log = os.environ.get('FM_TEST_OPEN_LOG')
+if log:
+    with open(log, 'a') as stream:
+        stream.write(json.dumps(sys.argv[1:]) + '\n')
+if os.environ.get('FM_TEST_OPEN_ERROR'):
+    print('Nessuna applicazione associata', file=sys.stderr)
+    sys.exit(4)
+print('OUTPUT DEL LAUNCHER')
+""".replace('REAL_GIO', repr(shutil.which('gio'))))
+_opener.chmod(0o755)
+
+
 class Session:
     def __init__(self, cwd: pathlib.Path, cols: int = 96, env: dict[str, str] | None = None):
         self.pid, self.fd = pty.fork()
@@ -43,6 +67,7 @@ class Session:
             os.environ.pop("ABFM_ASCII", None)
             if env:
                 os.environ.update(env)
+            os.environ["PATH"] = OPENER_STUB.name + os.pathsep + os.environ["PATH"]
             os.execl(SCRIPT, SCRIPT, str(cwd))
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 28, cols, 0, 0))
         os.set_blocking(self.fd, False)
@@ -183,6 +208,82 @@ def test_queued_navigation_keeps_following_command_responsive():
                 assert (root / "rinominato").read_text() == "80"
             finally:
                 session.close()
+
+
+def test_open_document_by_keyboard_and_double_click():
+    for action in (ENTER, RIGHT, "mouse"):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            work = root / "work"
+            work.mkdir()
+            document = work / "- report $(touch INATTESO); ' ü\n.PDF"
+            document.write_bytes(b"%PDF-1.4\n")
+            log = root / "opened.jsonl"
+            session = Session(work, env={"FM_TEST_OPEN_LOG": str(log)})
+            try:
+                if action == "mouse":
+                    session.mouse(0, 10, 5)
+                    assert not log.exists(), "Il clic singolo deve solo selezionare"
+                    session.mouse(0, 10, 5)
+                else:
+                    session.key(action)
+                session.drain(0.1)
+                assert json.loads(log.read_text()) == ["open", str(document)]
+                assert b"Apertura richiesta:" in session.output[-3000:]
+                assert b"OUTPUT DEL LAUNCHER" not in session.output
+                assert not (work / "INATTESO").exists()
+                assert document.read_bytes() == b"%PDF-1.4\n"
+            finally:
+                session.close()
+
+
+def test_open_document_error_and_broken_link():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        work = root / "work"
+        work.mkdir()
+        document = work / "document.txt"
+        document.write_text("intatto")
+        (work / "broken").symlink_to(work / "missing")
+        log = root / "opened.jsonl"
+        session = Session(work, env={"FM_TEST_OPEN_LOG": str(log), "FM_TEST_OPEN_ERROR": "1"})
+        try:
+            session.key(ENTER)  # link interrotto
+            assert not log.exists()
+            session.key(DOWN)
+            session.key(ENTER)
+            assert json.loads(log.read_text()) == ["open", str(document)]
+            assert b"Nessuna applicazione associata" in session.output[-3000:]
+            assert document.read_text() == "intatto"
+        finally:
+            session.close()
+
+
+def test_real_gio_uses_isolated_mime_association():
+    gio = shutil.which("gio")
+    if not gio:
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        apps = root / "data" / "applications"
+        config = root / "config"
+        apps.mkdir(parents=True)
+        config.mkdir()
+        handler = root / "handler.py"
+        log = root / "opened.json"
+        handler.write_text("import json, pathlib, sys; pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))")
+        (apps / "fm-test-viewer.desktop").write_text(
+            "[Desktop Entry]\nType=Application\nName=FM test viewer\nTerminal=false\n"
+            f"Exec={sys.executable} {handler} {log} %f\nMimeType=application/pdf;\n"
+        )
+        (config / "mimeapps.list").write_text("[Default Applications]\napplication/pdf=fm-test-viewer.desktop;\n")
+        document = root / "documento con spazi.pdf"
+        document.write_bytes(b"%PDF-1.4\n")
+        subprocess.run([gio, "open", str(document)], env={**os.environ, "XDG_CONFIG_HOME": str(config), "XDG_DATA_HOME": str(root / "data")}, capture_output=True, check=True)
+        deadline = time.monotonic() + 3
+        while not log.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert json.loads(log.read_text()) == [str(document)]
 
 
 def test_scrolling_redraws_only_active_list():
@@ -1948,7 +2049,7 @@ def test_filter_clears_on_directory_open_and_double_click():
 
 
 if __name__ == "__main__":
-    tests = [test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
+    tests = [test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
              test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,

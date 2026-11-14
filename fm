@@ -10,7 +10,7 @@ Uso: fm [DIRECTORY]
 File manager TUI a uno o due pannelli (Bash, senza ncurses).
 
  Frecce Su/Giu                   seleziona la riga (stile Lynx)
- Freccia Destra / Invio           apre dir o avvia file eseguibile
+ Freccia Destra / Invio           apre directory/file (MIME) o avvia eseguibili
  Freccia Sinistra / Backspace     torna al padre sulla cartella lasciata
  PgUp / PgDn / Home / End         navigazione veloce
  F1                               menu comandi di Midnight Commander
@@ -894,6 +894,24 @@ run_executable() {
         return
     fi
     run_program 1 "$path"
+}
+
+open_document() {
+    local path=$1 error_file error
+    if ! command -v gio >/dev/null 2>&1; then
+        notice='Apertura MIME non disponibile: installa gio (libglib2.0-bin).'
+        return
+    fi
+    error_file=$(mktemp) || return
+    if gio open "$path" </dev/null >/dev/null 2>"$error_file"; then
+        safe "${path##*/}"
+        notice="Apertura richiesta: $REPLY"
+    else
+        error=$(<"$error_file")
+        safe "$error"
+        notice="Apertura non riuscita: $REPLY"
+    fi
+    rm -f -- "$error_file"
 }
 
 edit_item() {
@@ -2001,8 +2019,10 @@ enter_dir() {
     elif [[ -f $path && -x $path ]]; then
         if is_archive_path "$cwd"; then notice='Archivio in sola lettura.'; return; fi
         run_executable
+    elif [[ -f $path ]]; then
+        open_document "$path"
     else
-        notice="Non e' una directory o un file eseguibile."
+        notice='File non disponibile o tipo non apribile.'
     fi
 }
 

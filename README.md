@@ -87,9 +87,9 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 | **Ctrl+S** | Crea nella cartella corrente un link simbolico assoluto chiamato `<nome>.lnk` |
 | ↑ / ↓, `j` / `k` | Muovi il cursore |
 | PagSu / PagGiù, Home / End | Scorrimento veloce |
-| **Freccia destra** / Invio / `l` | Entra nella directory, oppure avvia un file eseguibile |
+| **Freccia destra** / Invio / `l` | Entra nella directory, apre un documento con l’app associata oppure avvia un eseguibile |
 | **Freccia sinistra** / Backspace / `h` | Risale evidenziando la cartella appena lasciata |
-| Mouse sinistro | Seleziona la riga; un doppio click apre una directory oppure esegue il file avviabile |
+| Mouse sinistro | Seleziona la riga; un doppio click apre la directory o il file, come Invio |
 | Click sull'indicatore di selezione (colonna 3) | Seleziona o deseleziona l'elemento; il bordo esterno non è cliccabile |
 | Rotella mouse | Scorre l'elenco |
 | Click sulla barra F2–F10 | Attiva la relativa funzione, anche nella barra compatta |
@@ -109,7 +109,7 @@ Da **100 colonne** in su compaiono automaticamente due pannelli affiancati, iniz
 
 Aprire la cartella di destinazione in un pannello, tornare con Tab al pannello sorgente, selezionare con **F3**, quindi premere **F5** per copiare o **F6** per spostare direttamente nell’altro pannello. Non serve un comando Incolla. Entrambi gli elenchi vengono aggiornati dopo l’operazione; le destinazioni esistenti non vengono sovrascritte.
 
-**Ctrl+F** avvia la ricerca nel pannello attivo: l’elenco si aggiorna **a ogni carattere**, senza distinguere maiuscole e minuscole. Il testo è letterale, compresi gli spazi; Backspace cancella l’ultimo carattere. **Su/Giù** scorrono i risultati e **Invio** entra subito nella cartella evidenziata oppure avvia il file eseguibile. Se non ci sono corrispondenze, Invio mantiene la ricerca aperta. **Esc** rimuove il filtro conservando l’elemento evidenziato; anche il testo vuoto mostra tutto. Durante la ricerca i caratteri stampabili (inclusi `q`, `j`, `k` e Spazio) fanno parte del nome cercato. Clic su una riga, F3, apertura e comandi operativi rimuovono il filtro conservando elemento e marcature; cambiando il testo del filtro si azzerano le marcature del pannello.
+**Ctrl+F** avvia la ricerca nel pannello attivo: l’elenco si aggiorna **a ogni carattere**, senza distinguere maiuscole e minuscole. Il testo è letterale, compresi gli spazi; Backspace cancella l’ultimo carattere. **Su/Giù** scorrono i risultati e **Invio** apre subito la cartella o il file evidenziato. Se non ci sono corrispondenze, Invio mantiene la ricerca aperta. **Esc** rimuove il filtro conservando l’elemento evidenziato; anche il testo vuoto mostra tutto. Durante la ricerca i caratteri stampabili (inclusi `q`, `j`, `k` e Spazio) fanno parte del nome cercato. Clic su una riga, F3, apertura e comandi operativi rimuovono il filtro conservando elemento e marcature; cambiando il testo del filtro si azzerano le marcature del pannello.
 
 Risalendo con **Sinistra**, Backspace o la voce `/..`, il cursore torna sulla cartella da cui si proviene. Lo scorrimento si adatta per mantenerla visibile anche negli elenchi lunghi. Rientrando in una cartella già visitata si ritrovano invece il file evidenziato e le marcature precedenti. **Destra** continua ad aprire la cartella evidenziata.
 
@@ -153,7 +153,9 @@ Gli script del menu vengono eseguiti con Bash nella directory del pannello attiv
 
 ## Esecuzione e gestione degli attributi
 
-Premendo **Invio** oppure **freccia destra** su un file regolare con permesso di esecuzione, `fm` lo avvia direttamente, senza usare `eval`. Il programma figlio riceve il terminale normale con **stdin, stdout e stderr**; alla sua uscita il file manager attende Invio prima di ripristinare la TUI. Non apre automaticamente file privi del bit eseguibile.
+Premendo **Invio** oppure **freccia destra** su un file regolare con permesso di esecuzione, `fm` lo avvia direttamente, senza usare `eval`. Il programma figlio riceve il terminale normale con **stdin, stdout e stderr**; alla sua uscita il file manager attende Invio prima di ripristinare la TUI. **Invio**, **freccia destra** e **doppio clic** su un file regolare senza permesso di esecuzione lo aprono con l’applicazione predefinita del desktop, tramite **`gio open`**: per esempio PDF nel lettore PDF, immagini nel visualizzatore e testo nell’editor associato. Il sistema riconosce il tipo MIME usando estensione e contenuto; `fm` rispetta le associazioni esistenti e non le modifica. Gli archivi continuano ad aprirsi dentro `fm`. Il clic singolo seleziona soltanto la riga.
+
+L’apertura MIME richiede il comando `gio` (`libglib2.0-bin` su Debian/Ubuntu/Mint) e un’applicazione associata al tipo di file. Il file manager resta utilizzabile mentre l’applicazione esterna è aperta. Se manca un’associazione o il lancio fallisce, il motivo compare nella riga di stato. Per cambiare l’app usare le preferenze del desktop oppure `xdg-mime default nome.desktop tipo/mime`. Non vengono aggiunte associazioni personali di `fm`.
 
 Le scorciatoie **Ctrl+X C/S** sono *sequenze*: premere `Ctrl+X`, rilasciare, quindi `c` per gli attributi o `s` per il link simbolico. La precedente sequenza Ctrl+X O è rimossa. **Ctrl+S** si preme direttamente.
 
