@@ -20,8 +20,11 @@ File manager TUI a uno o due pannelli (Bash, senza ncurses).
  F5                               copia nell’altro pannello (o chiede destinazione)
  F6                               sposta nell’altro pannello (o chiede destinazione)
  F7                               crea una directory
+ Ctrl+X S con super-root opposta  aggiunge la cartella selezionata ai segnalibri
+ F2 / F8 in Connessioni           rinomina / elimina solo profilo o collegamento
  F8                               cancella (chiede conferma)
  F10                              esci dal file manager
+ ?                                istruzioni e scorciatoie (finestra scorrevole)
  Esc poi 1...9 / 0 (entro 0,5 s)  equivale a F1...F9 / F10 (F9 non assegnato)
  Ctrl+X poi C                     permessi, proprietario e gruppo
  Ctrl+X poi S                     crea un link simbolico (anche Ctrl+S)
@@ -87,8 +90,9 @@ declare -A pane_marks=() directory_focus=() directory_scroll=() directory_marks=
 # Origine dell'ultima marcatura esplicita, usata da F5/F6 a pannello unico.
 connections_root='@connections'
 connections_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections
+shortcuts_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm/shortcuts
 declare -A connection_names=() connection_protocols=() connection_addresses=()
-declare -A remote_labels=() remote_protocols=() archive_sources=() archive_cache=()
+declare -A remote_labels=() remote_protocols=() remote_addresses=() archive_sources=() archive_cache=()
 archive_pending_cache=''
 declare -a selection_sources=('' '')
 # Coordinate di rendering: righe salvate per evitare redraw completi.
@@ -318,6 +322,9 @@ reload() {
     if [[ $cwd == "$connections_root" ]]; then
         entries=('local' 'ssh' 'ftp')
         load_saved_connections
+        for path in "$shortcuts_dir"/*; do
+            [[ -L $path ]] && entries+=("$path")
+        done
     else
         for path in "$cwd"/*; do
             name=${path##*/}
@@ -422,6 +429,12 @@ paint_entry() {
             profile:*) label=${connection_names[${item#profile:}]:-Connessione};;
         esac
         kind='/'; row_style=$CLR_DIR
+        if [[ $item == "$shortcuts_dir/"* ]]; then
+            kind='@'; row_style=$CLR_LINK
+            local shortcut_target
+            shortcut_target=$(readlink -- "$item")
+            [[ -d $item || $shortcut_target == sftp://* || $shortcut_target == ftp://* ]] || row_style=$CLR_BADLINK
+        fi
     elif [[ $item == '..' ]]; then
         kind='/'; label='..'; row_style=$CLR_DIR
     elif [[ -L $item ]]; then
@@ -475,13 +488,15 @@ draw_panel() {
 
 selection_status() {
     local path=${entries[cursor]} target
-    if [[ $cwd != "$connections_root" && -L $path ]] && target=$(readlink -- "$path"); then
+    if [[ $path == /* && -L $path ]] && target=$(readlink -- "$path"); then
         safe "$target"
         REPLY=" Link -> $REPLY"
+    elif [[ $cwd == "$connections_root" ]]; then
+        REPLY=' Ctrl+X S: segnalibro dal pannello opposto | F2/F8: modifica | ?: istruzioni'
     elif (( dual_pane )); then
         REPLY=' Tab: cambia lato | Ctrl+F: filtro | F5/F6: trasferisci nel pannello opposto'
     else
-        REPLY=' Frecce: naviga | Ctrl+F: filtro | F10: esci'
+        REPLY=' Frecce: naviga | Ctrl+F: filtro | ?: istruzioni | F10: esci'
     fi
 }
 
@@ -725,7 +740,8 @@ collect() {
 }
 
 rename_item() {
-    local path=${entries[cursor]} name file_error=''
+    local path=${entries[cursor]} name file_error='' destination=$cwd
+    [[ $cwd == "$connections_root" ]] && destination=$shortcuts_dir
     if [[ $path == '..' ]]; then
         notice='Seleziona prima un elemento.'
         return
@@ -737,11 +753,11 @@ rename_item() {
         return
     fi
     if [[ $name == "${path##*/}" ]]; then notice='Nome invariato.'; return; fi
-    if [[ -e $cwd/$name || -L $cwd/$name ]]; then
+    if [[ -e $destination/$name || -L $destination/$name ]]; then
         notice="Esiste gia' un elemento con quel nome."
         return
     fi
-    if file_command mv -T -- "$path" "$cwd/$name"; then
+    if file_command mv -T -- "$path" "$destination/$name"; then
         reload
         notice="Rinominato: $name"
     else
@@ -1055,6 +1071,43 @@ modal_button_at() {
 modal_cancel() {
     notice=$1
     needs_full=1
+}
+
+show_help() {
+    local offset=0 capacity limit i button_x
+    local -a help_lines=()
+    needs_full=1
+    while :; do
+        modal_frame 'Istruzioni' 90 26
+        mapfile -t help_lines < <(usage | fold -s -w "$((modal_w-4))")
+        capacity=$((modal_h-5))
+        limit=$((${#help_lines[@]}-capacity))
+        (( limit < 0 )) && limit=0
+        (( offset > limit )) && offset=$limit
+        (( offset < 0 )) && offset=0
+        for ((i=0; i<capacity && i+offset<${#help_lines[@]}; i++)); do
+            modal_line "$((i+1))" "${help_lines[i+offset]}"
+        done
+        modal_rule "$((modal_h-4))"
+        modal_line "$((modal_h-3))" 'Frecce/Pg/Home/End: scorri'
+        button_x=$(((modal_w-10)/2))
+        modal_text "$((modal_h-2))" "$button_x" 10 '[ Chiudi ]' "$CLR_DIALOG_FOCUS"
+        if ! input_key; then needs_full=1; return; fi
+        case $KEY in
+            UP) ((offset-=1));; DOWN) ((offset+=1));;
+            PAGEUP) ((offset-=capacity));; PAGEDOWN) ((offset+=capacity));;
+            HOME) offset=0;; END) offset=$limit;;
+            ENTER|ESC|F10|'?') needs_full=1; return;;
+            MOUSE)
+                if (( MOUSE_BTN == 64 )); then ((offset-=1))
+                elif (( MOUSE_BTN == 65 )); then ((offset+=1))
+                elif [[ $MOUSE_ACTION == M && $MOUSE_BTN == 0 ]] &&
+                     (( MOUSE_Y == modal_y+modal_h-2 && MOUSE_X >= modal_x+button_x && MOUSE_X < modal_x+button_x+10 )); then
+                    needs_full=1; return
+                fi
+                ;;
+        esac
+    done
 }
 
 # Menu personale MC: condizioni valutate senza eseguire codice shell.
@@ -1529,6 +1582,16 @@ attributes_items() {
 }
 
 create_symlink() {
+    if [[ $cwd == "$connections_root" ]]; then
+        if (( !dual_pane )); then notice='Apri due pannelli per aggiungere un segnalibro.'; return; fi
+        if [[ ${pane_dirs[1-active_pane]} == "$connections_root" ]]; then
+            notice='Seleziona una cartella nel pannello opposto alla super-root.'; return
+        fi
+    fi
+    if (( dual_pane )) && [[ $cwd == "$connections_root" || ${pane_dirs[1-active_pane]} == "$connections_root" ]]; then
+        add_shortcut
+        return
+    fi
     local path=${entries[cursor]} name file_error=''
     if [[ $path == '..' ]]; then
         notice='Seleziona un file o una directory per il link.'
@@ -1829,6 +1892,87 @@ sys.exit(status)
 PY
 }
 
+add_shortcut() {
+    local path name destination error root protocol address relative
+    if [[ $cwd == "$connections_root" ]]; then
+        path=$(
+            local cwd cursor scroll filter show_hidden needs_full
+            local -a entries=()
+            local -A marks=()
+            load_pane "$((1-active_pane))"
+            printf '%s' "${entries[cursor]}"
+        )
+    else path=${entries[cursor]}; fi
+    if [[ $path == '..' || ! -d $path ]]; then
+        notice='Seleziona una cartella nel pannello opposto alla super-root.'; return
+    fi
+    name="${path##*/}.lnk"
+    if ! path=$(cd -P -- "$path" 2>/dev/null && pwd -P); then
+        notice='Cartella non disponibile.'; return
+    fi
+    if is_archive_path "$path"; then
+        notice='Per i segnalibri scegli una cartella fuori dagli archivi.'; return
+    fi
+    destination=$path
+    if is_remote_path "$path"; then
+        root=$REPLY
+        protocol=${remote_protocols[$root]}; address=${remote_addresses[$root]}
+        relative=${path#"$root"}; relative=${relative:-/}
+        destination=$(/usr/bin/python3 - "$protocol" "$address" "$relative" <<'PYURI'
+import sys
+from urllib.parse import quote
+protocol, address, path = sys.argv[1:]
+user, host = address.rsplit('@', 1)
+scheme = 'sftp' if protocol == 'ssh' else 'ftp'
+print(f'{scheme}://{quote(user, safe="")}@{host}{quote(path, safe="/")}')
+PYURI
+        ) || return
+    fi
+    if [[ -e $shortcuts_dir/$name || -L $shortcuts_dir/$name ]]; then
+        notice="Esiste gia' un elemento con quel nome."; return
+    fi
+    if error=$({ mkdir -p -- "$shortcuts_dir" && ln -s -- "$destination" "$shortcuts_dir/$name"; } 2>&1); then
+        reload
+        notice="Segnalibro aggiunto: $name"
+    else
+        safe "$error"; notice="Creazione non riuscita: $REPLY"
+    fi
+}
+
+open_shortcut() {
+    local target root part
+    local -a location=()
+    target=$(readlink -- "$1") || return
+    if [[ $target == sftp://* || $target == ftp://* ]]; then
+        while IFS= read -r -d '' part; do location+=("$part"); done < <(/usr/bin/python3 - "$target" <<'PYURI'
+import sys
+import posixpath
+from urllib.parse import unquote, urlsplit
+try:
+    uri = urlsplit(sys.argv[1])
+    if uri.scheme not in ('sftp', 'ftp') or not uri.username or uri.password is not None or not uri.hostname:
+        raise ValueError()
+    uri.port
+    address = unquote(uri.username) + '@' + uri.netloc.rsplit('@', 1)[1]
+    path = posixpath.normpath('/' + unquote(uri.path).lstrip('/'))
+    protocol = 'ssh' if uri.scheme == 'sftp' else 'ftp'
+    sys.stdout.write('\0'.join((protocol, address, path)) + '\0')
+except ValueError:
+    pass
+PYURI
+        )
+        if (( ${#location[@]} != 3 )); then notice='Segnalibro remoto non valido.'; return; fi
+        for root in "${!remote_labels[@]}"; do
+            if [[ ${remote_protocols[$root]} == "${location[0]}" && ${remote_addresses[$root]} == "${location[1]}" && -d $root ]]; then
+                change_directory "$root/${location[2]#/}"
+                return
+            fi
+        done
+        connect_remote "${location[0]}" "${location[1]}" "${location[2]}"
+    elif [[ -d $1 ]]; then change_directory "$1"
+    else notice='Scorciatoia non disponibile: verifica la cartella di destinazione.'; fi
+}
+
 # Tre righe per voce: protocollo, indirizzo, nome. Il nome non e' mai un percorso.
 save_connection() {
     local protocol=$1 address=$2 name=${3:-} id file saved old_protocol='' old_address=''
@@ -1891,6 +2035,13 @@ rename_saved_connection() {
 
 delete_saved_connection() {
     local entry=${entries[cursor]} id
+    if [[ $entry == "$shortcuts_dir/"* && -L $entry ]]; then
+        if ! ask 'Eliminare solo la scorciatoia? s/N: '; then return; fi
+        if [[ $REPLY != [sSyY] ]]; then notice='Eliminazione annullata.'; return; fi
+        if rm -- "$entry" 2>/dev/null; then reload; notice='Scorciatoia eliminata.'
+        else notice='Impossibile eliminare la scorciatoia.'; fi
+        return
+    fi
     id=${entry#profile:}
     if [[ $entry != profile:* || ! -v connection_names["$id"] ]]; then
         notice='Seleziona una connessione salvata.'; return
@@ -1904,7 +2055,7 @@ delete_saved_connection() {
 }
 
 connect_remote() {
-    local protocol=$1 remote_address=${2:-} remote_password='' password_fd result mount_path status
+    local protocol=$1 remote_address=${2:-} bookmark_path=${3:-/} remote_password='' password_fd result mount_path status
     local profile_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm
     if [[ -z $remote_address && -r $profile_dir/last-$protocol ]]; then
         IFS= read -r remote_address < "$profile_dir/last-$protocol"
@@ -1927,7 +2078,9 @@ connect_remote() {
     fi
     remote_labels["$mount_path"]="${protocol^^} $remote_address"
     remote_protocols["$mount_path"]=$protocol
+    remote_addresses["$mount_path"]=$remote_address
     if ! change_directory "$mount_path"; then return; fi
+    if [[ $bookmark_path != / ]] && ! change_directory "$mount_path/${bookmark_path#/}"; then return; fi
     local saved
     if saved=$(umask 077; mkdir -p -- "$profile_dir" && mktemp "$profile_dir/.last-$protocol.XXXXXX"); then
         if printf '%s\n' "$remote_address" > "$saved" && mv -T -- "$saved" "$profile_dir/last-$protocol"; then
@@ -2003,6 +2156,9 @@ enter_dir() {
         case $path in
             local) change_directory /;;
             ssh|ftp) connect_remote "$path";;
+            "$shortcuts_dir/"*)
+                open_shortcut "$path"
+                ;;
             profile:*)
                 local id=${path#profile:}
                 if [[ -v connection_protocols["$id"] ]]; then
@@ -2089,9 +2245,13 @@ perform_key() {
     fi
     if [[ $cwd == "$connections_root" ]]; then
         case $1 in
-            F2) rename_saved_connection; return 0;;
+            F2)
+                if [[ ${entries[cursor]} == "$shortcuts_dir/"* && -L ${entries[cursor]} ]]; then rename_item
+                else rename_saved_connection; fi
+                return 0;;
+            SYMLINK) create_symlink; return 0;;
             F8) delete_saved_connection; return 0;;
-            UP|DOWN|LEFT|RIGHT|BACK|HOME|END|PAGEUP|PAGEDOWN|ENTER|TAB|F10|ESC|k|j|h|l|r|R|q|Q) ;;
+            UP|DOWN|LEFT|RIGHT|BACK|HOME|END|PAGEUP|PAGEDOWN|ENTER|TAB|F10|ESC|'?'|k|j|h|l|r|R|q|Q) ;;
             *) notice='Scegli Questo PC, SSH o FTP.'; return 0;;
         esac
     fi
@@ -2147,6 +2307,7 @@ perform_key() {
             else notice='File nascosti non visibili.'; fi
             ;;
         F1) user_menu;;
+        '?') show_help;;
         F2) rename_item;;
         F3)
             select_current

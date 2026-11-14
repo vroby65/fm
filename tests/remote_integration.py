@@ -182,7 +182,7 @@ if "--session" not in sys.argv:
                 ["dbus-run-session", "--", sys.executable, __file__, "--session"] + sys.argv[1:],
                 env=env,
                 check=True,
-                timeout=150,
+                timeout=210,
             )
         finally:
             # Solo il mount FUSE privato del test, anche se il bus e' gia' terminato.
@@ -429,6 +429,77 @@ try:
             assert (remote / "move.txt").read_text() == "move " + protocol
             assert not (upload / "move.txt").exists()
             print("PASS upload/move and remembered address", protocol, kind, flush=True)
+        finally:
+            s.close()
+        # Segnalibro dalla cartella selezionata alla super-root opposta.
+        bookmark_folder = remote / "nuova" / "Spazi è"
+        bookmark_folder.mkdir()
+        (bookmark_folder / "bookmark.txt").write_text("bookmark " + protocol)
+        bookmark_link = config / "fm" / "shortcuts" / "Spazi è.lnk"
+        s = m["Session"](pathlib.Path("/"), cols=120, env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            s.key(m["LEFT"])  # super-root a sinistra
+            s.key(b"\t")
+            s.key(m["LEFT"])
+            s.key(m["DOWN"])
+            if protocol == "ftp": s.key(m["DOWN"])
+            s.key(m["ENTER"])
+            s.type(f"fmtest@127.0.0.1:{port}")
+            s.key(b"\t")
+            s.key(m["ENTER"])  # mount gia' attivo
+            deadline = time.monotonic() + 10
+            while b"hello.txt" not in s.output[-15000:] and time.monotonic() < deadline: s.drain(.1)
+            s.key(b"\x1b[H")
+            s.key(m["DOWN"])
+            s.key(m["RIGHT"])  # nuova
+            s.key(m["DOWN"])  # Spazi è: dopo .., unico elemento
+            s.key(b"\x18s")
+            deadline = time.monotonic() + 5
+            while not bookmark_link.is_symlink() and time.monotonic() < deadline: s.drain(.1)
+            assert bookmark_link.is_symlink(), bytes(s.output[-6000:])
+            bookmark_uri = os.readlink(bookmark_link)
+            assert bookmark_uri.startswith(("sftp" if protocol == "ssh" else "ftp") + "://")
+            assert bookmark_uri.endswith("/nuova/Spazi%20%C3%A8")
+            assert "test-secret" not in bookmark_uri
+            s.key(b"\t")
+            s.key(m["END"])
+            start = len(s.output)
+            s.key(m["ENTER"])  # riusa il mount conosciuto senza dialog
+            deadline = time.monotonic() + 5
+            while b"bookmark.txt" not in s.output[start:] and time.monotonic() < deadline: s.drain(.1)
+            assert b"bookmark.txt" in s.output[start:], bytes(s.output[-6000:])
+        finally:
+            s.close()
+        scheme = "sftp" if protocol == "ssh" else "ftp"
+        mounted_paths = [path for path in (root / "runtime" / "gvfs").iterdir() if f"port={port}" in path.name]
+        assert mounted_paths, "Mount privato non trovato"
+        subprocess.run(["gio", "mount", "-u", f"{scheme}://fmtest@127.0.0.1:{port}/"], check=True)
+        deadline = time.monotonic() + 8
+        while any(path.exists() for path in mounted_paths) and time.monotonic() < deadline: time.sleep(.05)
+        assert not any(path.exists() for path in mounted_paths), "Smontaggio FUSE non completato"
+        s = m["Session"](pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
+        try:
+            s.key(m["LEFT"])
+            s.key(m["END"])
+            s.key(m["ENTER"])
+            assert f"fmtest@127.0.0.1:{port}".encode() in s.output[-12000:]
+            s.key(b"\t")
+            if kind == "password" and keyring is None: s.type("test-secret")
+            start = len(s.output)
+            s.key(m["ENTER"])
+            deadline = time.monotonic() + 15
+            while b"bookmark.txt" not in s.output[start:] and time.monotonic() < deadline: s.drain(.1)
+            assert b"bookmark.txt" in s.output[start:], bytes(s.output[-4000:])
+            for _ in range(3): s.key(m["LEFT"])
+            s.key(m["END"])
+            s.key(m["F8"])
+            s.type("s")
+            s.key(m["ENTER"])
+            deadline = time.monotonic() + 5
+            while bookmark_link.is_symlink() and time.monotonic() < deadline: s.drain(.1)
+            assert not bookmark_link.is_symlink(), bytes(s.output[-4000:])
+            assert (bookmark_folder / "bookmark.txt").read_text() == "bookmark " + protocol
+            print("PASS remote bookmark create/reuse/reconnect/delete", protocol, kind, flush=True)
         finally:
             s.close()
         if kind == "password":

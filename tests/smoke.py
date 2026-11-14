@@ -210,6 +210,142 @@ def test_queued_navigation_keeps_following_command_responsive():
                 session.close()
 
 
+def test_connection_shortcuts_create_open_rename_delete_and_restart():
+    for focus_root in (False, True):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            config = root / "config"
+            target = root / "cartella con spazi"
+            target.mkdir()
+            (target / "intatto.txt").write_text("intatto")
+            env = {"XDG_CONFIG_HOME": str(config)}
+            session = Session(root, cols=120, env=env)
+            try:
+                for _ in root.parts:
+                    session.key(LEFT)  # super-root a sinistra
+                session.key(b"\t")  # cartella evidenziata a destra
+                if focus_root:
+                    session.key(b"\t")
+                session.key(b"\x18s")
+                link = config / "fm" / "shortcuts" / (target.name + ".lnk")
+                assert link.is_symlink()
+                assert link.resolve() == target
+                if not focus_root:
+                    session.key(b"\t")
+                session.key(END)
+                session.key(ENTER)
+                assert b"intatto.txt" in session.output[-10000:]
+            finally:
+                session.close()
+            session = Session(pathlib.Path('/'), env=env)
+            try:
+                session.key(LEFT)
+                session.key(END)
+                session.key(F2)
+                session.type("Documenti")
+                session.key(ENTER)
+                renamed = link.with_name("Documenti")
+                assert renamed.is_symlink() and not link.is_symlink()
+                session.key(F8)
+                session.type("n")
+                session.key(ENTER)
+                assert renamed.is_symlink()
+                session.key(F8)
+                session.type("s")
+                session.key(ENTER)
+                assert not renamed.is_symlink()
+                assert (target / "intatto.txt").read_text() == "intatto"
+            finally:
+                session.close()
+
+
+def test_connection_shortcuts_existing_broken_and_duplicate():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        source = root / "source"
+        target = source / "target"
+        target.mkdir(parents=True)
+        links = root / "config" / "fm" / "shortcuts"
+        links.mkdir(parents=True)
+        (target / "intatto").write_text("intatto")
+        (links / "target.lnk").symlink_to(target)
+        (links / "z-rotto").symlink_to(root / "missing")
+        (links / "non-link").write_text("ignorato")
+        session = Session(source, cols=120, env={"XDG_CONFIG_HOME": str(root / "config")})
+        try:
+            for _ in source.parts:
+                session.key(LEFT)
+            session.key(END)
+            session.key(ENTER)
+            assert b"Scorciatoia non disponibile" in session.output[-5000:]
+            session.key(b"\t")
+            session.key(b"\x18s")
+            assert b"Esiste gia'" in session.output[-3000:]
+            assert (links / "target.lnk").resolve() == target
+            assert not (source / "target.lnk").exists(), "Il link deve nascere nella super-root"
+            assert (links / "non-link").read_text() == "ignorato"
+        finally:
+            session.close()
+
+
+def test_bookmark_requires_a_source_pane():
+    source = pathlib.Path(SCRIPT).read_text()
+    helper = source[source.index('create_symlink() {'):source.index('# Le connessioni GVfs')]
+    for dual, message in ((0, 'due pannelli'), (1, 'cartella')):
+        script = helper + f"\ndual_pane={dual}; active_pane=0; cwd=@connections; connections_root=@connections; declare -a entries=(local) pane_dirs=(@connections @connections); file_command() {{ printf 'COMANDO_INATTESO'; }}; reload() {{ :; }}; add_shortcut() {{ printf 'COMANDO_INATTESO'; }}; create_symlink; printf '%s' \"$notice\""
+        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True)
+        assert 'COMANDO_INATTESO' not in result.stdout
+        assert message in result.stdout
+
+
+def test_remote_bookmark_uri_reconnects_to_saved_directory():
+    source = pathlib.Path(SCRIPT).read_text()
+    helper = source[source.index('open_shortcut() {'):source.index('# Tre righe per voce:')]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        link = root / "Lavoro"
+        for uri, protocol, address, path in (
+            ('sftp://user@host:2222/dir%20con%20spazi/%C3%A8', 'ssh', 'user@host:2222', '/dir con spazi/è'),
+            ('ftp://user@host:2121/cartella', 'ftp', 'user@host:2121', '/cartella'),
+            ('sftp://user@host/a/../../cartella', 'ssh', 'user@host', '/cartella'),
+        ):
+            if link.is_symlink(): link.unlink()
+            link.symlink_to(uri)
+            result = subprocess.run(['bash', '-c', helper + '\ndeclare -A remote_labels=() remote_protocols=() remote_addresses=(); connect_remote() { printf "%s\\0" "$@"; }; open_shortcut "$1"', 'fm-test', str(link)], capture_output=True, check=True)
+            assert result.stdout.decode().split('\0')[:-1] == [protocol, address, path]
+
+
+def test_question_help_scroll_resize_and_return():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "originale.txt").write_text("intatto")
+        session = Session(root)
+        try:
+            session.key(b"?")
+            assert b"Istruzioni" in session.output[-15000:]
+            session.key(END)
+            assert b"ABFM_ASCII" in session.output[-15000:]
+            session.resize(35)
+            session.key(b"\x1b[H")
+            assert b"Istruzioni" in session.output[-8000:]
+            session.key(ENTER)
+            session.key(F2)
+            session.type("ritrovato.txt")
+            session.key(ENTER)
+            assert (root / "ritrovato.txt").read_text() == "intatto"
+        finally:
+            session.close()
+        session = Session(pathlib.Path('/'), cols=120, env={"XDG_CONFIG_HOME": str(root / 'config'), "ABFM_ASCII": "1", "ABFM_NO_COLOR": "1"})
+        try:
+            session.key(LEFT)
+            session.key(b"?")
+            assert b"Istruzioni" in session.output[-15000:]
+            session.key(b"\x1b")
+            assert b"Questo PC" in session.output[-10000:]
+        finally:
+            session.close()
+
+
 def test_open_document_by_keyboard_and_double_click():
     for action in (ENTER, RIGHT, "mouse"):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2049,7 +2185,7 @@ def test_filter_clears_on_directory_open_and_double_click():
 
 
 if __name__ == "__main__":
-    tests = [test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
+    tests = [test_connection_shortcuts_create_open_rename_delete_and_restart, test_connection_shortcuts_existing_broken_and_duplicate, test_question_help_scroll_resize_and_return, test_remote_bookmark_uri_reconnects_to_saved_directory, test_bookmark_requires_a_source_pane, test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
              test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,

@@ -68,8 +68,11 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 
 ## Tasti
 
+Premere **?** durante la navigazione per aprire queste istruzioni: **Su/Giù**, **PgUp/PgDn**, **Home/End** o rotella scorrono; **Invio**, **Esc**, **?** o il pulsante **Chiudi** tornano al pannello. L’aiuto è disponibile anche nel menu Connessioni e si adatta al ridimensionamento. Durante la ricerca Ctrl+F, `?` resta un carattere del nome cercato.
+
 | Tasto | Azione |
 | --- | --- |
+| **?** | Apre le istruzioni e le scorciatoie in una finestra scorrevole |
 | **F1** | Apre il menu comandi personale di Midnight Commander |
 | **F2** | Apre la finestra Rinomina per il file o la cartella evidenziata |
 | **F3** / **Ins** / Spazio | Seleziona o deseleziona il file corrente (`*`) e avanza di una riga |
@@ -124,6 +127,10 @@ Alla radice `/`, **Sinistra**, Backspace o l’apertura di `/..` portano al menu
 Invio, Destra o doppio clic aprono la voce. Per SSH/FTP una finestra chiede **`utente@host`** (anche `utente@host:porta`) e **password**, visualizzata mascherata. Lasciare la password vuota per riutilizzare quella salvata nel portachiavi; per SSH sono disponibili anche le chiavi configurate in OpenSSH o nell’agente. La prima verifica dell’identità SSH, se richiesta, mostra impronta e scelte nel terminale: la fiducia nell’host deve essere confermata dall’utente. Esc annulla la finestra; Ctrl+C interrompe una connessione in corso.
 
 Dopo un collegamento riuscito la connessione compare sotto queste tre voci, anche ai successivi avvii. **F2** ne modifica il nome; **F8** la elimina dall’elenco dopo conferma. L’eliminazione riguarda solo la voce salvata e non disconnette il mount né cancella file remoti. Questo PC, SSH e FTP rimangono sempre disponibili. Invio, Destra o doppio clic su una connessione salvata riaprono il dialog con l’indirizzo compilato e la password vuota. Riconnettersi allo stesso indirizzo non crea duplicati e conserva il nome scelto.
+
+**Segnalibri a cartelle locali o remote**: tenere la **super-root Connessioni** in un pannello e selezionare nell’altro la cartella da ricordare. **Ctrl+X S** (anche **Ctrl+S**) aggiunge il collegamento alla super-root; funziona con il focus su uno qualsiasi dei due pannelli. Il nome iniziale è `<cartella>.lnk`, modificabile con **F2**. Nomi esistenti non vengono sovrascritti. Senza la super-root nel pannello opposto, Ctrl+X S conserva la normale creazione del link nella cartella corrente.
+
+I segnalibri sono veri link simbolici in `${XDG_CONFIG_HOME:-$HOME/.config}/fm/shortcuts/`: per le cartelle locali puntano al percorso assoluto, per SSH/FTP a un URI con indirizzo e percorso remoto, senza password. Sono mostrati anche i link aggiunti manualmente qui. **Invio**, **Destra** o doppio clic aprono la destinazione. I segnalibri remoti riusano la connessione già conosciuta; dopo un riavvio o una disconnessione riaprono il dialog precompilato, poi entrano nella cartella salvata. La password viene gestita dal portachiavi come per le altre connessioni. **F8** elimina solo il collegamento dopo conferma, lasciando intatti cartella e contenuto. I link locali interrotti restano visibili e possono essere rinominati o eliminati; la destinazione compare nella riga di stato.
 
 Le connessioni salvate contengono soltanto protocollo, indirizzo e nome, in `${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections/`, con permessi 0600. Gli ultimi indirizzi della versione precedente vengono importati una volta; le voci eliminate non vengono ricreate automaticamente.
 
