@@ -122,11 +122,13 @@ for suffix, mode in formats:
             session.key(b"\x06")
             session.type("esterno")
             session.key(m["ENTER"])
+            session.key(m["ENTER"])
             assert b"privato.txt" not in session.output[-5000:], "Seguito link esterno"
             session.key(m["F7"])
             assert b"sola lettura" in session.output[-5000:], "Uscita dalla radice archivio tramite link"
         session.key(b"\x06")
         session.type("annidato")
+        session.key(m["ENTER"])
         session.key(m["ENTER"])
         deadline = time.monotonic() + 15
         while b"interno.txt" not in session.output[-12000:] and time.monotonic() < deadline:

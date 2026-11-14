@@ -2,7 +2,7 @@
 
 File manager **TUI a uno o due pannelli**, ispirato ai tasti funzione di Midnight Commander e pensato per una piccola finestra terminale in **ai-bar**.
 
-Il programma è scritto in **Bash 4+**, usa **mouse xterm/SGR**, il **tema grigio grafite** con convenzioni di navigazione simili a Lynx e cornici Unicode box-drawing (`┌─┐`, `│ │`, `└─┘`), con fallback ASCII. **Niente ncurses, dialog, fzf o dipendenze TUI**: su Linux servono soltanto Bash, `stty` e i comandi GNU di base (`cp`, `mv`, `mkdir`, `rm`).
+Il programma è scritto in **Bash 4+**, usa **mouse xterm/SGR**, il **tema grigio grafite** con convenzioni di navigazione simili a Lynx e cornici Unicode box-drawing (`┌─┐`, `│ │`, `└─┘`), con fallback ASCII. **Niente ncurses, dialog, fzf o dipendenze TUI**: su Linux servono soltanto Bash, `stty` e i comandi GNU di base (`cp`, `mv`, `mkdir`, `rm`, `grep`).
 
 ## Installazione rapida (un solo comando)
 
@@ -68,7 +68,7 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 
 ## Tasti
 
-Premere **?** durante la navigazione per aprire queste istruzioni: **Su/Giù**, **PgUp/PgDn**, **Home/End** o rotella scorrono; **Invio**, **Esc**, **?** o il pulsante **Chiudi** tornano al pannello. L’aiuto è disponibile anche nel menu Connessioni e si adatta al ridimensionamento. Durante la ricerca Ctrl+F, `?` resta un carattere del nome cercato.
+Premere **?** durante la navigazione per aprire queste istruzioni: **Su/Giù**, **PgUp/PgDn**, **Home/End** o rotella scorrono; **Invio**, **Esc**, **?** o il pulsante **Chiudi** tornano al pannello. L’aiuto è disponibile anche nel menu Connessioni e si adatta al ridimensionamento. Nel dialog Ctrl+F, `?` resta un carattere letterale del campo cercato.
 
 | Tasto | Azione |
 | --- | --- |
@@ -86,7 +86,7 @@ Premere **?** durante la navigazione per aprire queste istruzioni: **Su/Giù**, 
 | **Ctrl+X**, poi **S** | Crea un link simbolico, come Ctrl+S |
 | **Tab** | Passa al pannello opposto quando visibile |
 | **Ctrl+H** | Mostra o nasconde file e cartelle nascosti nel pannello attivo |
-| **Ctrl+F** | Cerca mentre digiti nel pannello attivo; Invio apre il risultato |
+| **Ctrl+F** | Apre il dialog filtro per nome file e testo contenuto nella cartella corrente |
 | **Ctrl+S** | Crea nella cartella corrente un link simbolico assoluto chiamato `<nome>.lnk` |
 | ↑ / ↓, `j` / `k` | Muovi il cursore |
 | PagSu / PagGiù, Home / End | Scorrimento veloce |
@@ -112,7 +112,9 @@ Da **100 colonne** in su compaiono automaticamente due pannelli affiancati, iniz
 
 Aprire la cartella di destinazione in un pannello, tornare con Tab al pannello sorgente, selezionare con **F3**, quindi premere **F5** per copiare o **F6** per spostare direttamente nell’altro pannello. Non serve un comando Incolla. Entrambi gli elenchi vengono aggiornati dopo l’operazione; le destinazioni esistenti non vengono sovrascritte.
 
-**Ctrl+F** avvia la ricerca nel pannello attivo: l’elenco si aggiorna **a ogni carattere**, senza distinguere maiuscole e minuscole. Il testo è letterale, compresi gli spazi; Backspace cancella l’ultimo carattere. **Su/Giù** scorrono i risultati e **Invio** apre subito la cartella o il file evidenziato. Se non ci sono corrispondenze, Invio mantiene la ricerca aperta. **Esc** rimuove il filtro conservando l’elemento evidenziato; anche il testo vuoto mostra tutto. Durante la ricerca i caratteri stampabili (inclusi `q`, `j`, `k` e Spazio) fanno parte del nome cercato. Clic su una riga, F3, apertura e comandi operativi rimuovono il filtro conservando elemento e marcature; cambiando il testo del filtro si azzerano le marcature del pannello.
+**Ctrl+F** apre il dialog **Filtro**, con i campi **Nome file** e **Testo contenuto**. La ricerca riguarda solo la **cartella corrente**, senza scendere nelle sottocartelle. Entrambi i campi cercano testo letterale senza distinguere maiuscole e minuscole; un campo vuoto non impone vincoli e, compilandoli entrambi, devono corrispondere entrambi. Il nome viene confrontato anche per le directory; il contenuto viene cercato solo nei file regolari leggibili, escludendo link simbolici e binari (nessuna estrazione del testo da PDF, documenti Office o archivi). Con entrambi i campi vuoti torna l’elenco completo.
+
+**Tab** o il mouse cambiano campo/pulsante; frecce, Home/End, Backspace/Canc e **Ctrl+U** modificano il campo. **Invio** o **Cerca** applicano il filtro; **Esc** o **Annulla** chiudono il dialog senza cambiare il filtro precedente. **Su/Giù** scorrono i risultati e **Invio** apre la voce evidenziata. Se non ci sono risultati, Invio mantiene la vista; **Ctrl+F** permette di correggere i criteri e **Esc** rimuove il filtro. Clic su una riga, F3, apertura e comandi operativi rimuovono il filtro conservando elemento e marcature. Applicare un filtro azzera le marcature del pannello. Ogni pannello conserva i propri criteri; i risultati restano memorizzati durante il ridisegno e **r** ripete la ricerca. **Ctrl+H** include/esclude i nascosti anche nella ricerca.
 
 Risalendo con **Sinistra**, Backspace o la voce `/..`, il cursore torna sulla cartella da cui si proviene. Lo scorrimento si adatta per mantenerla visibile anche negli elenchi lunghi. Rientrando in una cartella già visitata si ritrovano invece il file evidenziato e le marcature precedenti. **Destra** continua ad aprire la cartella evidenziata.
 

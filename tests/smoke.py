@@ -139,7 +139,7 @@ def test_escape_digit_and_insert_decoding():
     decoder = source[source.index("input_key() {"):source.index("# Inserimento in modalita'")]
     for sequence, expected in [(b"\x1b" + str(n).encode(), f"F{n or 10}") for n in range(10)] + [(b"\x1b[2~", "F3")]:
         result = subprocess.run(
-            ["bash", "-c", decoder + '\nexec 9<&0; PENDING_CHAR=; filter_editing=0; input_key; printf "%s" "$KEY"'],
+            ["bash", "-c", decoder + '\nexec 9<&0; PENDING_CHAR=; input_key; printf "%s" "$KEY"'],
             input=sequence, capture_output=True, check=True,
         )
         assert result.stdout.decode() == expected, (sequence, result.stdout)
@@ -572,6 +572,7 @@ u Smarca selezione
             session.key(LEFT)
             session.key(b"\x06")
             session.type("dest")
+            session.key(ENTER)
             session.key(ENTER)
             session.key(b"\t")
             session.key(F1)
@@ -1826,7 +1827,173 @@ def test_move_multiple_relative_destination():
 
 
 
-def test_live_filter_and_enter_opens_or_runs():
+def test_filter_dialog_content_and_actions():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        nested = root / "cartella con spazi"
+        nested.mkdir()
+        (root / "Report.TXT").write_text("Una frase SPECIALE [x] qui")
+        (root / "report-altro.txt").write_text("altro")
+        (root / "report.bin").write_bytes(b"\0speciale [x]")
+        (root / "altro.txt").write_text("speciale [x]")
+        (nested / "Report-nascosto.txt").write_text("speciale [x]")
+        (root / "Report-link.txt").symlink_to(nested / "Report-nascosto.txt")
+        log = root / "opened.jsonl"
+        session = Session(root, env={"FM_TEST_OPEN_LOG": str(log)})
+        try:
+            session.key(b"\x06")
+            assert b"Nome file:" in session.output and b"Testo contenuto:" in session.output
+            session.type("report")
+            session.key(b"\t")
+            session.type("speciale [x]")
+            start = len(session.output)
+            session.key(ENTER)
+            screen = session.output[start:]
+            assert b"Report.TXT" in screen
+            assert b"report-altro.txt" not in screen
+            assert b"report.bin" not in screen
+            assert b"Report-nascosto.txt" not in screen
+            assert b"Report-link.txt" not in screen
+            session.key(ENTER)
+            assert json.loads(log.read_text().splitlines()[0]) == ["open", str(root / "Report.TXT")]
+            session.key(F2)
+            session.type("rinominato.txt")
+            session.key(ENTER)
+            assert (root / "rinominato.txt").is_file()
+            assert not (nested / "rinominato.txt").exists()
+        finally:
+            session.close()
+
+
+def test_filter_dialog_cancel_resize_and_content_only():
+    for cols in (35, 96, 120):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "deep").mkdir()
+            (root / "deep" / "escluso.txt").write_text("ago nel testo")
+            (root / "a.txt").write_text("ago nel testo")
+            (root / "b.txt").write_text("altro")
+            session = Session(root, cols=cols)
+            try:
+                session.key(b"\x06")
+                session.key(b"\t")
+                session.type("AGO")
+                session.key(ENTER)
+                assert b"Risultati: 1." in session.output[-10000:]
+                assert b"escluso.txt" not in session.output[-10000:]
+                session.key(b"\x06")
+                session.key(b"\x15")
+                session.type("inesistente")
+                session.resize(60)
+                session.key(b"\x1b")
+                start = len(session.output)
+                session.key(b"r")
+                assert b"a.txt" in session.output[start:]
+                session.key(b"\x1b")
+                session.key(b"\x06")
+                session.type("nessun-file")
+                session.key(ENTER)
+                session.key(ENTER)
+                assert b"Nessuna corrispondenza" in session.output[-3000:]
+                session.key(b"\x1b")
+            finally:
+                session.close()
+
+
+def test_content_filter_panes_cache_and_refresh():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        work = root / "work"
+        work.mkdir()
+        (work / "a.txt").write_text("alpha")
+        (work / "b.txt").write_text("beta")
+        tools = root / "bin"
+        tools.mkdir()
+        log = root / "grep.log"
+        grep = tools / "grep"
+        grep.write_text('#!/bin/sh\nprintf "scan\\n" >> "$FM_TEST_GREP_LOG"\nexec /usr/bin/grep "$@"\n')
+        grep.chmod(0o755)
+        session = Session(work, cols=120, env={"PATH": str(tools) + os.pathsep + os.environ["PATH"], "FM_TEST_GREP_LOG": str(log)})
+        try:
+            for query in ("alpha", "beta"):
+                session.key(b"\x06")
+                session.key(b"\t")
+                session.type(query)
+                session.key(ENTER)
+                session.key(b"\t")
+            assert len(log.read_text().splitlines()) == 4
+            session.resize(96)
+            session.resize(120)
+            session.key(b"\t")
+            session.key(b"\t")
+            assert len(log.read_text().splitlines()) == 4, "Contenuto riletto durante il ridisegno"
+            session.key(b"r")
+            assert len(log.read_text().splitlines()) == 6
+            session.key(F2)
+            session.type("left.txt")
+            session.key(ENTER)
+            assert (work / "left.txt").read_text() == "alpha"
+            session.key(b"\t")
+            session.key(F2)
+            session.type("right.txt")
+            session.key(ENTER)
+            assert (work / "right.txt").read_text() == "beta"
+            session.key(b"\x06")
+            session.key(b"\t")
+            session.type("alpha")
+            session.key(ENTER)
+            session.key(b"\t")
+            session.key(F2)
+            session.type("updated.txt")
+            session.key(ENTER)
+            session.key(b"\t")
+            session.key(F2)
+            session.type("final.txt")
+            session.key(ENTER)
+            assert (work / "final.txt").read_text() == "alpha", "Risultati opposti non aggiornati dopo la rinomina"
+        finally:
+            session.close()
+
+
+def test_filter_dialog_mouse_buttons_and_editing():
+    for cols in (35, 96, 120):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "a.txt").write_text("frase esatta")
+            (root / "b.txt").write_text("altro")
+            session = Session(root, cols=cols)
+            try:
+                session.key(b"\x06")
+                session.type("aX.txt")
+                session.key(b"\x1b[H")
+                session.key(RIGHT)
+                session.key(b"\x1b[3~")
+                width = min(cols - 4, 72)
+                x = (cols - width) // 2 + 1
+                y = (28 - 12) // 2 + 1
+                session.mouse(0, x + 4, y + 5)
+                session.type("frase esattx")
+                session.key(LEFT)
+                session.key(b"\x1b[3~")
+                session.type("a")
+                session.mouse(0, x + (width - 25) // 2 + 2, y + 9)
+                session.key(F2)
+                session.type("scelto.txt")
+                session.key(ENTER)
+                assert (root / "scelto.txt").read_text() == "frase esatta"
+                assert (root / "b.txt").is_file()
+                session.key(b"\x06")
+                session.type("non-applicare")
+                session.mouse(0, x + (width - 25) // 2 + 17, y + 9)
+                session.key(F2)
+                session.type("ancora.txt")
+                session.key(ENTER)
+                assert (root / "ancora.txt").is_file()
+            finally:
+                session.close()
+
+
+def test_filter_dialog_and_enter_opens_or_runs():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         (root / "altro").mkdir()
@@ -1840,9 +2007,10 @@ def test_live_filter_and_enter_opens_or_runs():
             session.key(b"\x06")
             start = len(session.output)
             session.type("car")
+            session.key(ENTER)
             screen = session.output[start:]
             assert b"/cartella" in screen
-            assert b"/altro" not in screen, "Filtro non aggiornato prima di Invio"
+            assert b"/altro" not in screen, "Filtro non applicato"
             session.key(ENTER)
             session.key(F7)
             session.type("nuova")
@@ -1852,10 +2020,12 @@ def test_live_filter_and_enter_opens_or_runs():
             session.key(b"\x06")
             session.type("esegui")
             session.key(ENTER)
+            session.key(ENTER)
             assert (root / "risultato").read_text() == "eseguito"
             session.key(ENTER)  # ritorna dall'eseguibile
             session.key(b"\x06")
             session.type("inesistente")
+            session.key(ENTER)
             session.key(ENTER)
             assert b"Nessuna corrispondenza" in session.output
             session.key(b"\x1b")
@@ -1890,7 +2060,7 @@ def test_parent_reselects_departed_directory():
                     session.close()
 
 
-def test_live_filter_spaces_backspace_and_escape():
+def test_filter_dialog_spaces_backspace_and_escape():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         for name in ("alfa uno.txt", "alfa due.txt", "beta.txt"):
@@ -1898,18 +2068,16 @@ def test_live_filter_spaces_backspace_and_escape():
         session = Session(root)
         try:
             session.key(b"\x06")
-            session.type("alfa ")
+            session.type("alfa ux")
+            session.key(BACK)
             start = len(session.output)
-            session.type("u")
+            session.key(ENTER)
             assert b"alfa uno.txt" in session.output[start:]
             assert b"alfa due.txt" not in session.output[start:]
-            start = len(session.output)
-            session.key(BACK)
-            assert b"alfa due.txt" in session.output[start:]
-            assert b"alfa uno.txt" in session.output[start:]
-            session.type("u")
-            session.key(b"\x1b")
-            session.drain(.2)
+            session.key(b"\x06")
+            session.key(b"\x15")
+            session.type("beta")
+            session.key(b"\x1b")  # annulla le modifiche al dialog
             session.key(F2)
             session.type("scelto.txt")
             session.key(ENTER)
@@ -1929,6 +2097,7 @@ def test_filter_names_and_reset():
             session.type("alph")
             start = len(session.output)
             session.type("a")
+            session.key(ENTER)
             assert b"ALPHA.txt" in session.output[start:]
             assert b"beta.txt" not in session.output[start:]
             session.key(F3)
@@ -2012,6 +2181,7 @@ def test_dual_filter_and_mouse_focus():
         try:
             session.key(b"\x06")
             session.type("alpha")
+            session.key(ENTER)
             session.mouse(0, 70, 6)  # beta nel pannello destro non filtrato
             session.key(F2)
             session.type("gamma.txt")
@@ -2144,6 +2314,7 @@ def test_filter_clears_on_choice_and_keeps_current_file():
             try:
                 session.key(b"\x06")
                 session.type("target")
+                session.key(ENTER)
                 start = len(session.output)
                 if choice == "mouse":
                     session.mouse(0, 10, 5)
@@ -2170,6 +2341,7 @@ def test_filter_clears_on_directory_open_and_double_click():
             try:
                 session.key(b"\x06")
                 session.type("target")
+                session.key(ENTER)
                 if mouse:
                     session.mouse(0, 10, 5)
                     session.mouse(0, 10, 5)
@@ -2185,7 +2357,7 @@ def test_filter_clears_on_directory_open_and_double_click():
 
 
 if __name__ == "__main__":
-    tests = [test_connection_shortcuts_create_open_rename_delete_and_restart, test_connection_shortcuts_existing_broken_and_duplicate, test_question_help_scroll_resize_and_return, test_remote_bookmark_uri_reconnects_to_saved_directory, test_bookmark_requires_a_source_pane, test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
+    tests = [test_content_filter_panes_cache_and_refresh, test_filter_dialog_mouse_buttons_and_editing, test_filter_dialog_content_and_actions, test_filter_dialog_cancel_resize_and_content_only, test_connection_shortcuts_create_open_rename_delete_and_restart, test_connection_shortcuts_existing_broken_and_duplicate, test_question_help_scroll_resize_and_return, test_remote_bookmark_uri_reconnects_to_saved_directory, test_bookmark_requires_a_source_pane, test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_filter_dialog_spaces_backspace_and_escape, test_filter_dialog_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
              test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,

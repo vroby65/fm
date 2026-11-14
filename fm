@@ -29,7 +29,7 @@ File manager TUI a uno o due pannelli (Bash, senza ncurses).
  Ctrl+X poi C                     permessi, proprietario e gruppo
  Ctrl+X poi S                     crea un link simbolico (anche Ctrl+S)
  Ctrl+S                           crea link assoluto <nome>.lnk
- Ctrl+F                           cerca mentre digiti; Invio apre il risultato
+ Ctrl+F                           dialog filtro per nome file e testo contenuto
  Ctrl+H                           mostra/nasconde file e cartelle nascosti
  Tab                              cambia pannello (da 100 colonne)
  Mouse click                      seleziona / doppio click apre
@@ -83,9 +83,10 @@ last_click_ms=0
 last_click_path=''
 MOUSE_BTN=0; MOUSE_X=0; MOUSE_Y=0; MOUSE_ACTION=''
 PENDING_CHAR=''
-active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' filter_editing=0 show_hidden=1 resized=0
+active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' content_filter='' show_hidden=1 resized=0
 # Stato delle due viste; la cronologia e' distinta per pannello e cartella.
-declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '') pane_hidden=(1 1)
+declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '') pane_contents=('' '') pane_hidden=(1 1)
+declare -A search_cache=() search_counts=()
 declare -A pane_marks=() directory_focus=() directory_scroll=() directory_marks=()
 # Origine dell'ultima marcatura esplicita, usata da F5/F6 a pannello unico.
 connections_root='@connections'
@@ -243,6 +244,7 @@ save_pane() {
     pane_cursors[active_pane]=$cursor
     pane_scrolls[active_pane]=$scroll
     pane_filters[active_pane]=$filter
+    pane_contents[active_pane]=$content_filter
     pane_hidden[active_pane]=$show_hidden
     for key in "${!pane_marks[@]}"; do
         [[ $key == "$active_pane:"* ]] && unset 'pane_marks[$key]'
@@ -256,8 +258,9 @@ load_pane() {
     local id=$1 key
     cwd=${pane_dirs[id]}; cursor=${pane_cursors[id]}
     scroll=${pane_scrolls[id]}; filter=${pane_filters[id]}
+    content_filter=${pane_contents[id]}
     show_hidden=${pane_hidden[id]}
-    reload
+    reload cached "$id"
     for key in "${!pane_marks[@]}"; do
         [[ $key == "$id:"* ]] && marks["${key#*:}"]=1
     done
@@ -265,7 +268,6 @@ load_pane() {
 
 switch_pane() {
     (( dual_pane )) || return 0
-    filter_editing=0
     save_pane
     active_pane=$((1-active_pane))
     load_pane "$active_pane"
@@ -274,18 +276,92 @@ switch_pane() {
 }
 
 filter_items() {
-    filter_editing=1
-    filter=''; cursor=1; scroll=0
-    reload
-    notice='Filtro: digita per cercare; Invio apre, Esc annulla.'
+    local name=$filter text=$content_filter focus=0 pos=${#filter} key value width offset style i x y
+    while :; do
+        modal_frame 'Filtro' 72 12
+        width=$((modal_w-8))
+        for i in 0 1; do
+            if (( i == 0 )); then value=$name; else value=$text; fi
+            style=$CLR_DIALOG; offset=0
+            if (( focus == i )); then
+                style=$CLR_CURSOR
+                (( pos>=width )) && offset=$((pos-width+1))
+            fi
+            if (( i == 0 )); then modal_line 1 'Nome file:' "$CLR_DIALOG_TITLE"
+            else modal_line 4 'Testo contenuto:' "$CLR_DIALOG_TITLE"; fi
+            modal_text "$((2+i*3))" 4 "$width" "${value:offset:width}" "$style"
+        done
+        modal_line 7 'Tab: campo  Invio: cerca  Esc: annulla'
+        modal_rule 8
+        modal_buttons "$((focus-2))" 'Cerca'
+        if (( focus<2 )); then
+            offset=0; (( pos>=width )) && offset=$((pos-width+1))
+            printf '\033[%d;%dH\033[?25h' "$((modal_y+2+focus*3))" "$((modal_x+4+pos-offset))" >&9
+        fi
+        if ! input_key; then
+            printf '\033[?25l' >&9
+            modal_cancel 'Filtro annullato.'; return
+        fi
+        printf '\033[?25l' >&9
+        key=$KEY
+        case $key in
+            ESC|F10) modal_cancel 'Filtro annullato.'; return;;
+            TAB|UP|DOWN)
+                if [[ $key == TAB ]]; then focus=$(((focus+1)%4)); else focus=$((1-focus%2)); fi
+                if (( focus == 0 )); then pos=${#name}; else pos=${#text}; fi
+                ;;
+            ENTER)
+                if (( focus==3 )); then modal_cancel 'Filtro annullato.'; return; fi
+                filter=$name; content_filter=$text; cursor=1; scroll=0
+                notice='Ricerca nella cartella corrente...'; needs_full=1
+                printf '\033[%d;1H%s' "$((rows-1))" "$notice" >&9
+                reload
+                notice="Risultati: $((${#entries[@]}-1)). Invio apre, Esc rimuove il filtro."
+                return
+                ;;
+            MOUSE)
+                x=$((MOUSE_X-modal_x)); y=$((MOUSE_Y-modal_y))
+                if [[ $MOUSE_ACTION == M && $MOUSE_BTN == 0 ]]; then
+                    if (( x>=4 && x<modal_w-4 && (y==2 || y==5) )); then
+                        focus=$(((y-2)/3))
+                        if (( focus==0 )); then pos=${#name}; else pos=${#text}; fi
+                    elif modal_button_at; then
+                        if [[ $REPLY == apply ]]; then focus=2; PENDING_CHAR=$'\r'
+                        else modal_cancel 'Filtro annullato.'; return; fi
+                    fi
+                fi
+                ;;
+            *)
+                if (( focus>=2 )); then
+                    [[ $key == F3 ]] && PENDING_CHAR=$'\r'
+                    continue
+                fi
+                if (( focus==0 )); then value=$name; else value=$text; fi
+                case $key in
+                    LEFT) ((pos>0)) && ((pos-=1));;
+                    RIGHT) ((pos<${#value})) && ((pos+=1));;
+                    HOME) pos=0;; END) pos=${#value};;
+                    BACK) if ((pos>0)); then value="${value:0:pos-1}${value:pos}"; ((pos-=1)); fi;;
+                    DELETE) value="${value:0:pos}${value:pos+1}";;
+                    $'\025') value=''; pos=0;;
+                    *)
+                        [[ $key == F3 ]] && key=' '
+                        if [[ ${#key} == 1 && $key == [[:print:]] ]] && (( ${#value}<200 )); then
+                            value="${value:0:pos}$key${value:pos}"; ((pos+=1))
+                        fi
+                        ;;
+                esac
+                if (( focus==0 )); then name=$value; else text=$value; fi
+                ;;
+        esac
+    done
 }
 
 clear_filter() {
-    filter_editing=0
-    [[ -n $filter ]] || return 0
+    [[ -n $filter || -n $content_filter ]] || return 0
     local current=${entries[cursor]} offset=$((cursor-scroll)) path i
     local -a selected=("${!marks[@]}")
-    filter=''
+    filter=''; content_filter=''
     reload
     for path in "${selected[@]}"; do marks["$path"]=1; done
     for i in "${!entries[@]}"; do
@@ -316,7 +392,7 @@ now_millis() {
 }
 
 reload() {
-    local path name
+    local path name i cache_pane=${2:-$active_pane}
     local -a dirs=() files=()
     entries=('..')
     if [[ $cwd == "$connections_root" ]]; then
@@ -325,14 +401,26 @@ reload() {
         for path in "$shortcuts_dir"/*; do
             [[ -L $path ]] && entries+=("$path")
         done
+    elif [[ ${1:-} == cached && ( -n $filter || -n $content_filter ) && -v search_counts[$cache_pane] ]]; then
+        for ((i=0; i<search_counts[$cache_pane]; i++)); do
+            entries+=("${search_cache[$cache_pane:$i]}")
+        done
     else
         for path in "$cwd"/*; do
             name=${path##*/}
             if (( !show_hidden )) && [[ $name == .* ]]; then continue; fi
             [[ ${name,,} == *"${filter,,}"* ]] || continue
+            if [[ -n $content_filter ]]; then
+                [[ -f $path && ! -L $path ]] || continue
+                grep -iIFq -- "$content_filter" "$path" 2>/dev/null || continue
+            fi
             [[ -d $path ]] && dirs+=("$path") || files+=("$path")
         done
         entries+=("${dirs[@]}" "${files[@]}")
+        if [[ -n $filter || -n $content_filter ]]; then
+            search_counts[$cache_pane]=$((${#entries[@]}-1))
+            for ((i=1; i<${#entries[@]}; i++)); do search_cache[$cache_pane:$((i-1))]=${entries[i]}; done
+        fi
     fi
     (( cursor >= ${#entries[@]} )) && cursor=$((${#entries[@]}-1))
     (( cursor < 0 )) && cursor=0
@@ -464,7 +552,7 @@ paint_entry() {
 }
 
 draw_panel() {
-    local drawing_pane=$1 cwd cursor scroll filter show_hidden pane_x pane_width inner needs_full
+    local drawing_pane=$1 cwd cursor scroll filter content_filter show_hidden pane_x pane_width inner needs_full
     local -a entries=()
     local -A marks=()
     local i title
@@ -474,7 +562,7 @@ draw_panel() {
     display_path "$cwd"
     title=" $REPLY"
     (( drawing_pane == active_pane )) && title=" * $REPLY"
-    [[ -n $filter ]] && title+=" [Filtro: $filter]"
+    [[ -n $filter || -n $content_filter ]] && title+=" [Filtro: $filter${content_filter:+ | Testo: $content_filter}]"
     printf '\033[1;%dH' "$pane_x" >&9
     border top
     printf '\033[2;%dH' "$pane_x" >&9
@@ -542,7 +630,7 @@ draw() {
             printf '\033[H' >&9
             border top
             display_path "$cwd"
-            line_text " fm  $REPLY${filter:+ [Filtro: $filter]}" "$CLR_TITLE"
+            line_text " fm  $REPLY${filter:+ [Nome: $filter]}${content_filter:+ [Testo: $content_filter]}" "$CLR_TITLE"
             column_header
             for ((i=0; i<visible; i++)); do
                 paint_entry "$((scroll+i))"
@@ -646,7 +734,7 @@ input_key() {
         ''|$'\r'|$'\n') KEY='ENTER';;
         $'\177') KEY='BACK';;
         $'\b') KEY='HIDDEN';;
-        ' ') if (( filter_editing )); then KEY=' '; else KEY='F3'; fi;;
+        ' ') KEY='F3';;
         $'\023') KEY='SYMLINK';;
         $'\006') KEY='FILTER';;
         $'\t') KEY='TAB';;
@@ -967,6 +1055,7 @@ run_program() {
     (( alt_screen )) && printf '\033[?1049h' >&9
     printf '\033[?25l\033[?1000h\033[?1006h' >&9
     needs_full=1
+    search_counts=()
     notice="Eseguito: $program_name (codice $status)."
     return "$status"
 }
@@ -975,6 +1064,7 @@ run_program() {
 file_command() {
     local error status
     file_error=''
+    search_counts=()
     if error=$(LC_ALL=C "$@" 2>&1); then return 0; fi
     if [[ $error == *'Operation not permitted'* || $error == *'Permission denied'* ]]; then
         local argument
@@ -1155,7 +1245,7 @@ menu_condition() {
 }
 
 menu_other_panel() {
-    local cwd cursor scroll filter show_hidden needs_full path
+    local cwd cursor scroll filter content_filter show_hidden needs_full path
     local -a entries=()
     local -A marks=()
     load_pane "$((1-active_pane))"
@@ -1896,7 +1986,7 @@ add_shortcut() {
     local path name destination error root protocol address relative
     if [[ $cwd == "$connections_root" ]]; then
         path=$(
-            local cwd cursor scroll filter show_hidden needs_full
+            local cwd cursor scroll filter content_filter show_hidden needs_full
             local -a entries=()
             local -A marks=()
             load_pane "$((1-active_pane))"
@@ -2111,7 +2201,7 @@ change_directory() {
         fi
     done
     for path in "${!marks[@]}"; do directory_marks["$active_pane:$path"]=$cwd; done
-    cwd=$destination; filter=''; filter_editing=0; cursor=1; scroll=0
+    cwd=$destination; filter=''; content_filter=''; cursor=1; scroll=0
     [[ $cwd == "$connections_root" ]] && cursor=0
     reload
     key="$active_pane:$cwd"
@@ -2255,35 +2345,8 @@ perform_key() {
             *) notice='Scegli Questo PC, SSH o FTP.'; return 0;;
         esac
     fi
-    if (( filter_editing )); then
-        local changed=0
-        case $1 in
-            ESC) clear_filter; notice='Filtro rimosso.'; return 0;;
-            ENTER|RIGHT)
-                if [[ -n $filter ]] && (( ${#entries[@]} <= 1 )); then
-                    notice='Nessuna corrispondenza: modifica il filtro o premi Esc.'
-                    return 0
-                fi
-                filter_editing=0
-                ;;
-            BACK) filter=${filter%?}; changed=1;;
-            FILTER) filter=''; changed=1;;
-            UP|DOWN|PAGEUP|PAGEDOWN|HOME|END) ;;
-            *)
-                if [[ ${#1} == 1 && $1 == [[:print:]] ]]; then
-                    (( ${#filter} < 200 )) && filter+=$1
-                    changed=1
-                else
-                    filter_editing=0
-                fi
-                ;;
-        esac
-        if (( changed )); then
-            cursor=1; scroll=0
-            reload
-            notice="Filtro: ${filter:-tutti} | Invio apre, Esc annulla."
-            return 0
-        fi
+    if [[ ( -n $filter || -n $content_filter ) && ( $1 == ENTER || $1 == RIGHT ) ]] && (( ${#entries[@]}<=1 )); then
+        notice='Nessuna corrispondenza: Ctrl+F modifica, Esc rimuove il filtro.'; return 0
     fi
     case $1 in
         ENTER|RIGHT|l|F1|F2|F3|F4|F5|F6|F7|F8|ATTRIBUTES|SYMLINK) clear_filter;;
@@ -2324,7 +2387,9 @@ perform_key() {
         SYMLINK) create_symlink;;
         BAD_CHORD) notice='Ctrl+X: C per attributi, S per link simbolico.';;
         r|R) reload; notice='Elenco aggiornato.';;
-        ESC) notice='Premi F10 per uscire.';;
+        ESC)
+            if [[ -n $filter || -n $content_filter ]]; then clear_filter
+            else notice='Premi F10 per uscire.'; fi;;
         F10) return 1;;
         *) ;;
     esac
@@ -2347,7 +2412,7 @@ while :; do
     # Applica in blocco la navigazione gia' in coda, poi disegna una sola volta.
     # Il primo comando diverso rimane in KEY e viene eseguito normalmente.
     navigation_count=0
-    while (( !filter_editing && navigation_count < 256 )) && IFS= read -rt 0 -u9; do
+    while (( navigation_count < 256 )) && IFS= read -rt 0 -u9; do
         case $KEY in
             UP|DOWN|PAGEUP|PAGEDOWN|HOME|END|j|k) ;;
             *) break;;
