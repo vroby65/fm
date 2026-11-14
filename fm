@@ -494,7 +494,7 @@ selection_status() {
     elif [[ $cwd == "$connections_root" ]]; then
         REPLY=' Ctrl+X S: segnalibro dal pannello opposto | F2/F8: modifica | ?: istruzioni'
     elif (( dual_pane )); then
-        REPLY=' Tab: cambia lato | Ctrl+F: filtro | F5/F6: trasferisci nel pannello opposto'
+        REPLY=' Tab: cambia lato | ?: Aiuto e scorciatoie | Ctrl+F: filtro | F5/F6: trasferisci nel pannello opposto'
     else
         REPLY=' Frecce: naviga | Ctrl+F: filtro | ?: istruzioni | F10: esci'
     fi
