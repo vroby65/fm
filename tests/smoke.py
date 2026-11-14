@@ -66,7 +66,7 @@ class Session:
 
     def key(self, value: bytes):
         os.write(self.fd, value)
-        self.drain()
+        self.drain(0.6 if value == b"\x1b" else 0.07)
 
     def mouse(self, button: int, x: int, y: int, release: bool = False):
         suffix = 'm' if release else 'M'
@@ -107,6 +107,104 @@ def fixture(root: pathlib.Path):
     (source / "delete.txt").write_text("cancella")
     (source / "file space.txt").write_text("spazi")
     return source, dest
+
+
+def test_escape_digit_and_insert_decoding():
+    source = pathlib.Path(SCRIPT).read_text()
+    decoder = source[source.index("input_key() {"):source.index("# Inserimento in modalita'")]
+    for sequence, expected in [(b"\x1b" + str(n).encode(), f"F{n or 10}") for n in range(10)] + [(b"\x1b[2~", "F3")]:
+        result = subprocess.run(
+            ["bash", "-c", decoder + '\nexec 9<&0; PENDING_CHAR=; filter_editing=0; input_key; printf "%s" "$KEY"'],
+            input=sequence, capture_output=True, check=True,
+        )
+        assert result.stdout.decode() == expected, (sequence, result.stdout)
+
+
+def test_selection_keys_advance_and_stop_at_last_entry():
+    for key in (F3, b"\x1b[2~", b" ", b"\x1b3"):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "a").write_text("a")
+            (root / "b").write_text("b")
+            session = Session(root)
+            try:
+                session.key(key)  # marca a e passa a b
+                session.key(key)  # marca l'ultimo senza tornare all'inizio
+                session.key(key)  # deseleziona l'ultimo
+                session.key(F8)
+                session.type("s")
+                session.key(ENTER)
+                assert not (root / "a").exists()
+                assert (root / "b").read_text() == "b"
+                session.key(F2)
+                session.type("c")
+                session.key(ENTER)
+                assert (root / "c").read_text() == "b"
+                session.key(b"\x1b[H")
+                session.key(key)  # .. non selezionabile e non avanza
+                session.key(F2)
+                assert b"Seleziona prima un elemento." in session.output[-1000:]
+            finally:
+                session.close()
+
+
+def test_escape_then_digit_with_typing_delay():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "originale").write_text("intatto")
+        session = Session(root)
+        try:
+            os.write(session.fd, b"\x1b")
+            session.drain(0.2)
+            session.key(b"2")
+            session.type("rinominato")
+            session.key(ENTER)
+            assert (root / "rinominato").read_text() == "intatto"
+            session.key(b"\x1b0")
+        finally:
+            session.close()
+
+
+def test_queued_navigation_keeps_following_command_responsive():
+    for cols in (96, 120):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for n in range(120):
+                (root / f"file{n:03}").write_text(str(n))
+            session = Session(root, cols=cols)
+            try:
+                start = len(session.output)
+                session.key(DOWN * 80 + F2)
+                session.drain(0.3)
+                assert len(session.output) - start < 15000, "Troppi ridisegni durante la raffica"
+                session.type("rinominato")
+                session.key(ENTER)
+                session.drain(0.5)
+                assert (root / "rinominato").read_text() == "80"
+            finally:
+                session.close()
+
+
+def test_scrolling_redraws_only_active_list():
+    for cols in (96, 120):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for n in range(40):
+                (root / f"file{n:03}").write_text(str(n))
+            session = Session(root, cols=cols)
+            try:
+                start = len(session.output)
+                session.key(b"\x1b[6~")
+                screen = session.output[start:]
+                assert b"file020" in screen
+                assert b"\x1b[1;" not in screen, "Scorrere non deve ridisegnare le cornici"
+                assert b"Dimensione" not in screen
+                session.key(F2)
+                session.type("scelto")
+                session.key(ENTER)
+                assert (root / "scelto").read_text() == "20"
+            finally:
+                session.close()
 
 
 def test_column_separators_continue_through_empty_rows():
@@ -232,7 +330,6 @@ u Smarca selezione
         session = Session(work, cols=120, env={"XDG_CONFIG_HOME": str(config)})
         try:
             session.key(F3)
-            session.key(DOWN)
             session.key(F3)
             session.key(b"\t")
             session.key(LEFT)
@@ -317,7 +414,6 @@ def test_directory_remembers_marks_and_drops_missing_files():
             session = Session(child, cols=cols)
             try:
                 session.key(F3)
-                session.key(DOWN)
                 session.key(F3)
                 session.key(LEFT)
                 if remove:
@@ -615,7 +711,7 @@ def test_copy_multiple():
         src, dst = fixture(pathlib.Path(tmp))
         s = Session(src)
         s.key(F3)        # tree/ (prima directory)
-        s.key(DOWN)      # alpha.txt
+        # F3 avanza ad alpha.txt
         s.key(F3)
         s.key(F5)
         s.type(str(dst))
@@ -830,6 +926,7 @@ def test_reference_palette_and_highlighting():
             assert b"\x1b[38;5;210;48;5;237m" in out, "Link interrotti rossi mancanti"
             assert b"\x1b[38;5;254;48;5;236m" in out, "Barra nera comandi mancante"
             s.key(F3)
+            s.key(UP)  # torna sulla riga marcata dopo l'avanzamento automatico
             assert b"\x1b[1;38;5;228;48;5;23m" in s.output, "Selezione marcata gialla mancante"
         finally:
             s.close()
@@ -1478,8 +1575,7 @@ def test_move_multiple_relative_destination():
         src, dst = fixture(pathlib.Path(tmp))
         session = Session(src)
         try:
-            session.key(F3)  # tree
-            session.key(DOWN)
+            session.key(F3)  # tree, poi avanza ad alpha.txt
             session.key(F3)  # alpha.txt
             session.key(F6)
             session.type("../dest")
@@ -1646,8 +1742,7 @@ def test_dual_copy_move_and_independent_selection():
         src, dst = fixture(pathlib.Path(tmp))
         session = Session(src, cols=120)
         try:
-            session.key(F3)  # seleziona tree a sinistra
-            session.key(DOWN)
+            session.key(F3)  # seleziona tree a sinistra e avanza
             session.key(F3)  # seleziona alpha
             session.key(b"\t")
             session.key(LEFT)
@@ -1853,7 +1948,7 @@ def test_filter_clears_on_directory_open_and_double_click():
 
 
 if __name__ == "__main__":
-    tests = [test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
+    tests = [test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_live_filter_spaces_backspace_and_escape, test_live_filter_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
              test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,

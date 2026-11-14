@@ -15,13 +15,14 @@ File manager TUI a uno o due pannelli (Bash, senza ncurses).
  PgUp / PgDn / Home / End         navigazione veloce
  F1                               menu comandi di Midnight Commander
  F2                               rinomina il file o la directory
- F3 (oppure Spazio)              seleziona/deseleziona
+ F3 / Ins / Spazio                seleziona/deseleziona e passa alla riga seguente
  F4                               edita con $EDITOR (oppure nano)
  F5                               copia nell’altro pannello (o chiede destinazione)
  F6                               sposta nell’altro pannello (o chiede destinazione)
  F7                               crea una directory
  F8                               cancella (chiede conferma)
  F10                              esci dal file manager
+ Esc poi 1...9 / 0 (entro 0,5 s)  equivale a F1...F9 / F10 (F9 non assegnato)
  Ctrl+X poi C                     permessi, proprietario e gruppo
  Ctrl+X poi S                     crea un link simbolico (anche Ctrl+S)
  Ctrl+S                           crea link assoluto <nome>.lnk
@@ -517,7 +518,7 @@ draw() {
     notice_y=$((visible+7))
     selection_status; status_text=$REPLY
 
-    if (( needs_full || rows != painted_rows || cols != painted_cols || scroll != painted_scroll )); then
+    if (( needs_full || rows != painted_rows || cols != painted_cols )); then
         # Riscrive alle posizioni fisse senza pulire tutto lo schermo.
         # Il bordo inferiore non emette CRLF, eliminando lo scroll terminale.
         if (( dual_pane )); then
@@ -540,9 +541,14 @@ draw() {
         fi
         needs_full=0
     else
-        # In navigazione aggiorna solo la vecchia e la nuova riga.
-        (( painted_cursor != cursor )) && paint_entry "$painted_cursor"
-        paint_entry "$cursor"
+        if (( scroll != painted_scroll )); then
+            # Scorre solo l'elenco attivo, senza ricaricare l'altro pannello.
+            for ((i=0; i<visible; i++)); do paint_entry "$((scroll+i))"; done
+        else
+            # In navigazione aggiorna solo la vecchia e la nuova riga.
+            (( painted_cursor != cursor )) && paint_entry "$painted_cursor"
+            paint_entry "$cursor"
+        fi
         if [[ $painted_status != "$status_text" ]]; then
             printf '\033[%d;1H' "$((notice_y-1))" >&9
             line_text "$status_text" "$CLR_STATUS"
@@ -570,8 +576,12 @@ input_key() {
     fi
     case $char in
         $'\e')
-            if ! IFS= read -rsn1 -t 0.10 -u9 next; then
+            if ! IFS= read -rsn1 -t 0.50 -u9 next; then
                 KEY='ESC'; return 0
+            fi
+            if [[ $next == [0-9] ]]; then
+                if [[ $next == 0 ]]; then KEY='F10'; else KEY="F$next"; fi
+                return 0
             fi
             if [[ $next != '[' && $next != 'O' ]]; then
                 # Esc seguito rapidamente da una lettera: non perdere
@@ -603,6 +613,7 @@ input_key() {
             case $code in
                 '[A') KEY='UP';; '[B') KEY='DOWN';; '[C') KEY='RIGHT';; '[D') KEY='LEFT';; '[H'|'OH'|'[1~'|'[7~') KEY='HOME';;
                 '[F'|'OF'|'[4~'|'[8~') KEY='END';;
+                '[2~') KEY='F3';;
                 '[3~') KEY='DELETE';;
                 '[5~') KEY='PAGEUP';; '[6~') KEY='PAGEDOWN';;
                 'OP'|'[11~'|'[[A') KEY='F1';;
@@ -2117,7 +2128,12 @@ perform_key() {
             ;;
         F1) user_menu;;
         F2) rename_item;;
-        F3) select_current;;
+        F3)
+            select_current
+            if [[ ${entries[cursor]} != '..' ]]; then
+                ((cursor+1<${#entries[@]})) && ((cursor+=1))
+            fi
+            ;;
         F4) edit_item;;
         F5) transfer_items copy;;
         F6) transfer_items move;;
@@ -2147,6 +2163,19 @@ while :; do
         [[ $KEY == F10 ]] && break
         continue
     fi
+    # Applica in blocco la navigazione gia' in coda, poi disegna una sola volta.
+    # Il primo comando diverso rimane in KEY e viene eseguito normalmente.
+    navigation_count=0
+    while (( !filter_editing && navigation_count < 256 )) && IFS= read -rt 0 -u9; do
+        case $KEY in
+            UP|DOWN|PAGEUP|PAGEDOWN|HOME|END|j|k) ;;
+            *) break;;
+        esac
+        perform_key "$KEY"
+        ((navigation_count+=1))
+        input_key || break
+    done
+    (( navigation_count )) && draw
     if [[ $KEY == MOUSE ]]; then
         KEY=''
         handle_mouse

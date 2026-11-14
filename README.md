@@ -72,7 +72,7 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 | --- | --- |
 | **F1** | Apre il menu comandi personale di Midnight Commander |
 | **F2** | Apre la finestra Rinomina per il file o la cartella evidenziata |
-| **F3** / Spazio | Seleziona o deseleziona il file corrente (`*`) |
+| **F3** / **Ins** / Spazio | Seleziona o deseleziona il file corrente (`*`) e avanza di una riga |
 | **F4** | Edita il file evidenziato con `$EDITOR`, oppure `nano` se non impostato |
 | **F5** | Copia la selezione nel pannello opposto; con un solo pannello chiede la destinazione |
 | **F6** | Sposta la selezione nel pannello opposto; con un solo pannello chiede la destinazione |
@@ -95,7 +95,13 @@ Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREAL
 | Click sulla barra F2–F10 | Attiva la relativa funzione, anche nella barra compatta |
 | `r` | Aggiorna |
 
-Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempio `/Documenti`), secondo la convenzione visiva di MC. I file e le directory **nascosti (`.nome`) sono visibili per impostazione predefinita**; **Ctrl+H** ne alterna la visibilità nel pannello attivo. Il simbolo `@` indica un collegamento simbolico. La riga `/..` permette di tornare al livello precedente. Durante la sessione, ogni cartella ricorda la riga evidenziata, lo scorrimento e i file marcati con F3/Spazio: uscendo e rientrando vengono ripristinati. La memoria è separata per i due pannelli e funziona anche nella vista singola; i file scomparsi vengono ignorati. Con un solo pannello, F5 e F6 chiedono una cartella di destinazione esistente, con percorso assoluto o relativo alla cartella corrente; Esc annulla. Dopo aver marcato file con F3 in una cartella, si può navigare altrove e usare F5/F6: vengono usati i percorsi assoluti dell’ultima selezione esplicita. In questo caso Invio vuoto sceglie la cartella corrente come destinazione. La selezione viene consumata dopo il tentativo di trasferimento; una sorgente scomparsa viene segnalata senza sostituirla con il file evidenziato nella destinazione. Se non ci sono marcature, operano sull’elemento evidenziato.
+**Esc seguito da 1…9 o 0**, entro mezzo secondo, equivale a **F1…F9 o F10**: per esempio Esc, poi 5 copia; Esc, poi 0 esce. F9 non ha attualmente un comando assegnato. Esc da solo continua ad annullare dopo questa breve attesa. Le alternative funzionano anche nelle finestre di dialogo. L’elenco dei tasti è disponibile anche con `fm --help`.
+
+F3, Ins e Spazio avanzano anche dopo aver deselezionato; sull’ultima riga il cursore si ferma. La riga `..` non si seleziona e non fa avanzare il cursore. Il clic sul simbolo di marcatura mantiene la riga cliccata.
+
+Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempio `/Documenti`), secondo la convenzione visiva di MC. I file e le directory **nascosti (`.nome`) sono visibili per impostazione predefinita**; **Ctrl+H** ne alterna la visibilità nel pannello attivo. Il simbolo `@` indica un collegamento simbolico. La riga `/..` permette di tornare al livello precedente. Durante la sessione, ogni cartella ricorda la riga evidenziata, lo scorrimento e i file marcati con F3/Ins/Spazio: uscendo e rientrando vengono ripristinati. La memoria è separata per i due pannelli e funziona anche nella vista singola; i file scomparsi vengono ignorati. Con un solo pannello, F5 e F6 chiedono una cartella di destinazione esistente, con percorso assoluto o relativo alla cartella corrente; Esc annulla. Dopo aver marcato file con F3 in una cartella, si può navigare altrove e usare F5/F6: vengono usati i percorsi assoluti dell’ultima selezione esplicita. In questo caso Invio vuoto sceglie la cartella corrente come destinazione. La selezione viene consumata dopo il tentativo di trasferimento; una sorgente scomparsa viene segnalata senza sostituirla con il file evidenziato nella destinazione. Se non ci sono marcature, operano sull’elemento evidenziato.
+
+Durante lo scorrimento viene ridisegnato soltanto l’elenco attivo. Le frecce e i tasti di navigazione già in coda vengono elaborati insieme prima del ridisegno, conservando il comando successivo: la ripetizione dei tasti non richiede un ridisegno per ogni pressione.
 
 ## Due pannelli e filtro
 
@@ -131,7 +137,7 @@ Il supporto remoto opzionale richiede **`/usr/bin/python3`, `python3-gi`, `gvfs-
 
 **Invio**, **Destra** o doppio clic su un archivio aprono i contenuti come una cartella. Sono riconosciuti ZIP, TAR (anche GZ, BZ2, XZ e ZST), TGZ, TBZ/TBZ2, TXZ, TZST, 7Z e RAR; la lettura dei singoli formati dipende da libarchive/GVfs installati. Alcuni 7Z/RAR richiedono operazioni di seek non disponibili nel backend e vengono segnalati come non supportati. Il percorso usa `archivio.zip!/cartella`. Dalla radice dell’archivio, **Sinistra**, Backspace o `..` tornano alla cartella di provenienza evidenziando l’archivio.
 
-**F3/Spazio** selezionano e **F5** copia file o cartelle all’esterno, anche nel pannello opposto. La navigazione è in sola lettura: rinomina, editor, spostamento, cancellazione, creazione, attributi e menu comandi sono disabilitati dentro l’archivio; non è possibile copiarvi nuovi file. L’originale rimane invariato. Per modificare i contenuti, copiarli prima in una cartella normale.
+**F3/Ins/Spazio** selezionano e **F5** copia file o cartelle all’esterno, anche nel pannello opposto. La navigazione è in sola lettura: rinomina, editor, spostamento, cancellazione, creazione, attributi e menu comandi sono disabilitati dentro l’archivio; non è possibile copiarvi nuovi file. L’originale rimane invariato. Per modificare i contenuti, copiarli prima in una cartella normale.
 
 Si possono aprire anche archivi annidati e presenti nei pannelli remoti: viene copiato in una directory temporanea privata solo il file compresso da aprire, senza estrarne tutto il contenuto. Le copie temporanee vengono smontate e rimosse alla chiusura di fm. I link contenuti negli archivi possono essere seguiti solo se restano al loro interno. Archivi danneggiati o non supportati mostrano un errore; non è previsto l’inserimento di password per archivi cifrati. Il supporto richiede il backend `gvfsd-archive`, incluso in `gvfs-backends`, oltre allo stack GIO/FUSE già usato per FTP e SSH.
 
