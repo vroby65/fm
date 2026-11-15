@@ -4,226 +4,397 @@ Questa è la versione italiana, mantenuta nel branch `italiano`. La versione ing
 
 File manager **TUI a uno o due pannelli**, ispirato ai tasti funzione di Midnight Commander e pensato per una piccola finestra terminale in **ai-bar**.
 
-Il programma è scritto in **Bash 4+**, usa **mouse xterm/SGR**, il **tema grigio grafite** con convenzioni di navigazione simili a Lynx e cornici Unicode box-drawing (`┌─┐`, `│ │`, `└─┘`), con fallback ASCII. **Niente ncurses, dialog, fzf o dipendenze TUI**: su Linux servono soltanto Bash, `stty` e i comandi GNU di base (`cp`, `mv`, `mkdir`, `rm`, `grep`).
+Written in **Bash 4+**, with **xterm/SGR mouse support**, a **graphite gray theme**,
+Lynx-style navigation and Unicode box-drawing frames (`┌─┐`, `│ │`, `└─┘`) with an
+ASCII fallback. No ncurses, dialog, fzf or TUI libraries. Local operations require
+Bash, `stty` and basic GNU utilities, including `cp`, `mv`, `mkdir`, `rm`, `grep`,
+`stat`, `numfmt` and `fold`.
 
-## Installazione rapida (un solo comando)
+`main` contains the English version. The [italiano branch](https://github.com/vroby65/fm/tree/italiano)
+contains the Italian version. In a clone, use `git switch italiano` to select it.
+Functional updates must be ported to each branch while retaining its language.
 
-Per scaricare e installare `fm` nella directory utente `~/.local/bin`, senza `sudo`, senza compilare e senza clonare il repository, esegui:
+## Quick installation
+
+Download and install the English version in `~/.local/bin`, without sudo,
+compilation or cloning the repository:
 
 ```bash
 mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
 ```
 
-Esegui subito il programma con:
+For the Italian version, use this command instead:
 
 ```bash
-"$HOME/.local/bin/fm"
+mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
 ```
 
 Ripetere il comando di installazione scarica la versione italiana aggiornata da `italiano`. Per il download e' necessario `curl`; il file manager in esecuzione non richiede `curl` ne' librerie TUI. Se `~/.local/bin` e' gia' nel `PATH`, basta digitare `fm` (anche da Fish).
 
-## Avvio
+## Getting started
 
 ```bash
 git clone --branch italiano https://github.com/vroby65/fm.git
 cd fm
 ./fm
-./fm "$HOME/Documenti"
+./fm "$HOME/Documents"
 ```
 
-Per un'installazione personale, dopo aver ottenuto il sorgente:
+Install from the checked-out source with:
 
 ```bash
 install -Dm755 fm "$HOME/.local/bin/fm"
 ```
 
-L'interfaccia richiede un terminale interattivo di almeno **35 colonne × 12 righe**; la larghezza consigliata è **70+ colonne**. Per un terminale integrato che gestisce già la propria schermata:
+Requires an interactive terminal of at least **35 columns × 12 rows**; **70+
+columns** are recommended. For an embedded terminal managing its own screen:
 
 ```bash
 ABFM_NO_ALT_SCREEN=1 fm
 ```
 
-Per utilizzare l’interfaccia senza colori o con cornici ASCII:
+Disable colors or use ASCII frames with:
 
 ```bash
 ABFM_NO_COLOR=1 fm
 ABFM_ASCII=1 fm
 ```
 
-## Tema grigio e navigazione stile Lynx
+`NO_COLOR` also disables colors. Unicode frames depend on a UTF-8 locale.
 
-Il pannello usa uno **sfondo grigio scuro con testo giallo tenue** (ANSI 256 colori). La riga attiva ha sfondo verde petrolio e testo chiaro. Eseguibili, collegamenti simbolici ed elementi marcati mantengono colori distintivi.
+## Theme and navigation
 
-Ogni pannello mostra le colonne **Nome**, **Dimensione** e **Ultima modifica**, con intestazioni giallo acceso come in Midnight Commander. La dimensione è in byte (unità IEC per valori oltre dieci cifre); per le directory è la dimensione della voce, senza sommare il contenuto. La data di modifica usa il formato `gg/mm/aaaa hh:mm` e il fuso orario locale. I nomi lunghi vengono troncati per mantenere allineate le colonne. I separatori verticali proseguono anche sulle righe vuote, fino al fondo del pannello.
+Panes use a **dark gray background and muted yellow text** (ANSI 256 colors).
+The active row has a teal background and light text. Executables, symbolic links
+and marked entries have distinct colors.
 
-La navigazione prende ispirazione da Lynx:
+Each pane shows **Name**, **Size** and **Last modified**, with bright yellow
+headings as in Midnight Commander. Size is in bytes, switching to IEC units above
+ten digits. Directory sizes describe the directory entry, without summing its
+contents. Modification dates use `dd/mm/yyyy hh:mm` in the local time zone. Long
+names are truncated to keep columns aligned. Vertical separators continue through
+empty rows to the bottom of each pane.
 
-- **Su / Giu** (o `j` / `k`): sposta la riga evidenziata
-- **Destra / Invio** (o `l`): entra nella directory evidenziata
-- **Sinistra / Backspace** (o `h`): torna alla directory superiore
+Navigation follows Lynx conventions: **Up/Down** (or `k`/`j`) moves the highlighted
+row; **Right/Enter** (or `l`) opens it; **Left/Backspace** (or `h`) goes to the
+parent, highlighting the directory just left. `/..` does the same. Directories
+have a `/` prefix, symbolic links an `@`. **Hidden files and directories (`.name`)
+are visible by default**; Ctrl+H toggles them in the active pane.
 
-Mouse, doppio clic, rotella e funzioni F2–F8 rimangono attivi. Le directory continuano a mostrare il prefisso `/` e i file nascosti sono visibili per impostazione predefinita. Le opzioni `ABFM_NO_COLOR=1` (o `NO_COLOR`) e `ABFM_ASCII=1` permettono di disabilitare i colori e le cornici Unicode.
+Double-click timing accepts either a comma or a dot in `EPOCHREALTIME`, including
+Italian locales.
 
-### Correzione clic ripetuti e locale italiana
+## Keys
 
-Il calcolo dei millisecondi per riconoscere il doppio clic normalizza `EPOCHREALTIME`: accetta **sia la virgola sia il punto decimale**. Questo evita l'errore aritmetico che poteva comparire alla riga 194 con una locale italiana.
+Press **?** while navigating to open scrollable help. **Up/Down**, **PgUp/PgDn**,
+**Home/End** and the mouse wheel scroll; **Enter**, **Esc**, **?**, **F10** or the
+**Close** button returns to the pane. Help also works in Connections and adapts
+to resize. In the Ctrl+F dialog, `?` remains literal search text.
 
-## Tasti
-
-Premere **?** durante la navigazione per aprire queste istruzioni: **Su/Giù**, **PgUp/PgDn**, **Home/End** o rotella scorrono; **Invio**, **Esc**, **?** o il pulsante **Chiudi** tornano al pannello. L’aiuto è disponibile anche nel menu Connessioni e si adatta al ridimensionamento. Nel dialog Ctrl+F, `?` resta un carattere letterale del campo cercato.
-
-| Tasto | Azione |
+| Key | Action |
 | --- | --- |
-| **?** | Apre le istruzioni e le scorciatoie in una finestra scorrevole |
-| **F1** | Apre il menu comandi personale di Midnight Commander |
-| **F2** | Apre la finestra Rinomina per il file o la cartella evidenziata |
-| **F3** / **Ins** / Spazio | Seleziona o deseleziona il file corrente (`*`) e avanza di una riga |
-| **F4** | Edita il file evidenziato con `$EDITOR`, oppure `nano` se non impostato |
-| **F5** | Copia la selezione nel pannello opposto; con un solo pannello chiede la destinazione |
-| **F6** | Sposta la selezione nel pannello opposto; con un solo pannello chiede la destinazione |
-| **F7** | Crea directory (digitare il nome e premere Invio) |
-| **F8** | Elimina file e directory selezionati, dopo conferma (`s`) |
-| **F10** | Esce dal file manager e ripristina il terminale (`q` e `Q` non chiudono) |
-| **Ctrl+X**, poi **C** | Apre la finestra unificata per permessi, proprietario e gruppo |
-| **Ctrl+X**, poi **S** | Crea un link simbolico, come Ctrl+S |
-| **Tab** | Passa al pannello opposto quando visibile |
-| **Ctrl+H** | Mostra o nasconde file e cartelle nascosti nel pannello attivo |
-| **Ctrl+F** | Apre il dialog filtro per nome file e testo contenuto nella cartella corrente |
-| **Ctrl+S** | Crea nella cartella corrente un link simbolico assoluto chiamato `<nome>.lnk` |
-| ↑ / ↓, `j` / `k` | Muovi il cursore |
-| PagSu / PagGiù, Home / End | Scorrimento veloce |
-| **Freccia destra** / Invio / `l` | Entra nella directory, apre un documento con l’app associata oppure avvia un eseguibile |
-| **Freccia sinistra** / Backspace / `h` | Risale evidenziando la cartella appena lasciata |
-| Mouse sinistro | Seleziona la riga; un doppio click apre la directory o il file, come Invio |
-| Click sull'indicatore di selezione (colonna 3) | Seleziona o deseleziona l'elemento; il bordo esterno non è cliccabile |
-| Rotella mouse | Scorre l'elenco |
-| Click sulla barra F2–F10 | Attiva la relativa funzione, anche nella barra compatta |
-| `r` | Aggiorna |
+| **?** | Open help and shortcuts |
+| **F1** | Open the personal Midnight Commander commands menu |
+| **F2** | Rename the highlighted file or directory |
+| **F3** / **Ins** / Space | Select/unselect (`*`) and advance one row |
+| **F4** | Edit with `$EDITOR`, or `nano` if unset |
+| **F5** | Copy selection to the other pane; ask for destination with one pane |
+| **F6** | Move selection to the other pane; ask for destination with one pane |
+| **F7** | Create a directory; type its name and press Enter |
+| **F8** | Delete selected files/directories after confirmation (`y`) |
+| **F10** | Quit and restore the terminal (`q` and `Q` do not quit) |
+| **Ctrl+X**, then **C** | Open permissions, owner and group dialog |
+| **Ctrl+X**, then **S** / **Ctrl+S** | Create an absolute symbolic link `<name>.lnk` |
+| **Tab** | Switch panes when both are visible |
+| **Ctrl+H** | Toggle hidden files and directories in the active pane |
+| **Ctrl+F** | Filter by file name and content in the current directory |
+| ↑ / ↓, `k` / `j` | Move the cursor |
+| PgUp / PgDn, Home / End | Navigate quickly |
+| **Right** / Enter / `l` | Open a directory/document or run an executable |
+| **Left** / Backspace / `h` | Go to parent and highlight the directory just left |
+| Left mouse button | Select a row; double-click opens it like Enter |
+| Mouse wheel | Scroll the list |
+| `r` | Refresh the list |
+| Esc then 1…9 / 0 within 0.5 seconds | F1…F9 / F10 (F9 unassigned) |
 
-**Esc seguito da 1…9 o 0**, entro mezzo secondo, equivale a **F1…F9 o F10**: per esempio Esc, poi 5 copia; Esc, poi 0 esce. F9 non ha attualmente un comando assegnato. Esc da solo continua ad annullare dopo questa breve attesa. Le alternative funzionano anche nelle finestre di dialogo. L’elenco dei tasti è disponibile anche con `fm --help`.
+Function buttons also support mouse clicks. On narrow windows labels shorten;
+the commands retain the same function keys. The parent entry cannot be marked;
+selecting the last entry keeps the cursor there. Clicking the selection mark
+toggles it without advancing.
 
-F3, Ins e Spazio avanzano anche dopo aver deselezionato; sull’ultima riga il cursore si ferma. La riga `..` non si seleziona e non fa avanzare il cursore. Il clic sul simbolo di marcatura mantiene la riga cliccata.
+During a session, every directory remembers its highlighted entry, scroll position
+and F3/Ins/Space marks. State is separate for each pane, works in single-pane mode,
+and ignores entries that disappear. Going to the parent instead highlights the
+directory just left and scrolls it into view.
 
-Le directory appaiono prima dei file e hanno **`/` davanti al nome** (per esempio `/Documenti`), secondo la convenzione visiva di MC. I file e le directory **nascosti (`.nome`) sono visibili per impostazione predefinita**; **Ctrl+H** ne alterna la visibilità nel pannello attivo. Il simbolo `@` indica un collegamento simbolico. La riga `/..` permette di tornare al livello precedente. Durante la sessione, ogni cartella ricorda la riga evidenziata, lo scorrimento e i file marcati con F3/Ins/Spazio: uscendo e rientrando vengono ripristinati. La memoria è separata per i due pannelli e funziona anche nella vista singola; i file scomparsi vengono ignorati. Con un solo pannello, F5 e F6 chiedono una cartella di destinazione esistente, con percorso assoluto o relativo alla cartella corrente; Esc annulla. Dopo aver marcato file con F3 in una cartella, si può navigare altrove e usare F5/F6: vengono usati i percorsi assoluti dell’ultima selezione esplicita. In questo caso Invio vuoto sceglie la cartella corrente come destinazione. La selezione viene consumata dopo il tentativo di trasferimento; una sorgente scomparsa viene segnalata senza sostituirla con il file evidenziato nella destinazione. Se non ci sono marcature, operano sull’elemento evidenziato.
+With one pane, F5/F6 ask for an existing destination directory, absolute or relative
+to the current directory; Esc cancels. After marking files in one directory, you
+can navigate elsewhere and transfer the last explicit selection using its absolute
+source paths. An empty Enter then selects the current directory as destination.
+The selection is consumed after the transfer attempt. A vanished source reports
+an error instead of transferring the highlighted destination file. Without marks,
+operations use the highlighted entry.
 
-Durante lo scorrimento viene ridisegnato soltanto l’elenco attivo. Le frecce e i tasti di navigazione già in coda vengono elaborati insieme prima del ridisegno, conservando il comando successivo: la ripetizione dei tasti non richiede un ridisegno per ogni pressione.
+## Two panes and filtering
 
-## Due pannelli e filtro
+At **100 columns** or more, two panes appear automatically, initially in the same
+directory. **Tab** or a click switches the active pane, marked `*` in its title.
+Each side retains its directory, cursor, scroll, selection, filter and hidden-file
+setting. Narrowing the window leaves the active pane visible; widening restores
+both and their state.
 
-Da **100 colonne** in su compaiono automaticamente due pannelli affiancati, inizialmente nella stessa cartella. **Tab** o un clic nell’elenco cambia il lato attivo, indicato da `*` nel titolo. Ogni lato conserva cartella, cursore, scorrimento, selezione, filtro e visibilità dei nascosti. Riducendo la finestra rimane visibile il pannello attivo; allargando ricompaiono entrambi con il loro stato. Se F5/F6 falliscono, la riga di stato mostra il motivo: stessa cartella, nome già presente, destinazione interna alla sorgente o errore restituito da `cp`/`mv`.
+Open a destination in one pane, Tab back to the source, mark files with **F3**,
+then press **F5** to copy or **F6** to move. Both lists refresh afterward. Existing
+destinations are never overwritten. Errors show the first cause, such as the same
+source/destination directory, an existing name, a destination inside the source,
+or the error returned by `cp`/`mv`.
 
-Aprire la cartella di destinazione in un pannello, tornare con Tab al pannello sorgente, selezionare con **F3**, quindi premere **F5** per copiare o **F6** per spostare direttamente nell’altro pannello. Non serve un comando Incolla. Entrambi gli elenchi vengono aggiornati dopo l’operazione; le destinazioni esistenti non vengono sovrascritte.
+**Ctrl+F** opens **Filter**, with **File name** and **Content text** fields.
+Search is literal, case-insensitive and limited to the **current directory**,
+without recursion. Empty fields impose no restriction; if both are filled, both
+must match. Names are also matched for directories. Content is searched only in
+readable regular files, excluding symbolic links and binary files; text is not
+extracted from PDFs, Office documents or archives. Emptying both fields restores
+the full list.
 
-**Ctrl+F** apre il dialog **Filtro**, con i campi **Nome file** e **Testo contenuto**. La ricerca riguarda solo la **cartella corrente**, senza scendere nelle sottocartelle. Entrambi i campi cercano testo letterale senza distinguere maiuscole e minuscole; un campo vuoto non impone vincoli e, compilandoli entrambi, devono corrispondere entrambi. Il nome viene confrontato anche per le directory; il contenuto viene cercato solo nei file regolari leggibili, escludendo link simbolici e binari (nessuna estrazione del testo da PDF, documenti Office o archivi). Con entrambi i campi vuoti torna l’elenco completo.
+**Tab** or mouse switches fields/buttons. Arrows, Home/End, Backspace/Delete and
+**Ctrl+U** edit the field. **Enter** or **Search** applies the criteria; **Esc**,
+F10 or **Cancel** closes without changing the previous filter. **Up/Down** browses
+results, **Enter** opens the highlighted entry. No results leaves the view in
+place; Ctrl+F edits the criteria and Esc clears them.
 
-**Tab** o il mouse cambiano campo/pulsante; frecce, Home/End, Backspace/Canc e **Ctrl+U** modificano il campo. **Invio** o **Cerca** applicano il filtro; **Esc** o **Annulla** chiudono il dialog senza cambiare il filtro precedente. **Su/Giù** scorrono i risultati e **Invio** apre la voce evidenziata. Se non ci sono risultati, Invio mantiene la vista; **Ctrl+F** permette di correggere i criteri e **Esc** rimuove il filtro. Clic su una riga, F3, apertura e comandi operativi rimuovono il filtro conservando elemento e marcature. Applicare un filtro azzera le marcature del pannello. Ogni pannello conserva i propri criteri; i risultati restano memorizzati durante il ridisegno e **r** ripete la ricerca. **Ctrl+H** include/esclude i nascosti anche nella ricerca.
+Clicking a row, marking with F3, opening an entry or running file operations clears
+the filter while preserving the highlighted entry and marks. Applying a filter
+clears pane marks. Each pane remembers its criteria; results are cached across
+redraws and **r** repeats the search. **Ctrl+H** includes/excludes hidden entries
+from the search too.
 
-Risalendo con **Sinistra**, Backspace o la voce `/..`, il cursore torna sulla cartella da cui si proviene. Lo scorrimento si adatta per mantenerla visibile anche negli elenchi lunghi. Rientrando in una cartella già visitata si ritrovano invece il file evidenziato e le marcature precedenti. **Destra** continua ad aprire la cartella evidenziata.
+## This PC, SSH and FTP
 
-## Questo PC, SSH e FTP
+From `/`, **Left**, Backspace or `/..` opens **Connections**, starting with:
 
-Alla radice `/`, **Sinistra**, Backspace o l’apertura di `/..` portano al menu **Connessioni**, che inizia con tre voci:
+- **This PC**: return to the local filesystem root.
+- **SSH**: connect using **SFTP over SSH**.
+- **FTP**: connect using FTP.
 
-- **Questo PC** torna alla radice del filesystem locale.
-- **SSH** apre una connessione **SFTP su SSH**.
-- **FTP** apre una connessione FTP.
+Enter, Right or double-click opens an entry. SSH/FTP ask for **`user@host`** (also
+`user@host:port`) and a masked **password**. Leave the password empty to reuse the
+system keyring; SSH also supports keys configured in OpenSSH or its agent. If SSH
+host verification is needed, the terminal displays its fingerprint and choices;
+the user must confirm trust. Esc cancels the dialog; Ctrl+C interrupts a connection.
 
-Invio, Destra o doppio clic aprono la voce. Per SSH/FTP una finestra chiede **`utente@host`** (anche `utente@host:porta`) e **password**, visualizzata mascherata. Lasciare la password vuota per riutilizzare quella salvata nel portachiavi; per SSH sono disponibili anche le chiavi configurate in OpenSSH o nell’agente. La prima verifica dell’identità SSH, se richiesta, mostra impronta e scelte nel terminale: la fiducia nell’host deve essere confermata dall’utente. Esc annulla la finestra; Ctrl+C interrompe una connessione in corso.
+Successful connections appear below the three fixed entries and persist across
+restarts. **F2** renames a profile; **F8** deletes it after confirmation. Deletion
+only removes the saved profile: it does not disconnect the mount or delete remote
+files. Opening a saved connection shows its address and an empty password field.
+Reconnecting to the same endpoint preserves the chosen name without duplicates.
 
-Dopo un collegamento riuscito la connessione compare sotto queste tre voci, anche ai successivi avvii. **F2** ne modifica il nome; **F8** la elimina dall’elenco dopo conferma. L’eliminazione riguarda solo la voce salvata e non disconnette il mount né cancella file remoti. Questo PC, SSH e FTP rimangono sempre disponibili. Invio, Destra o doppio clic su una connessione salvata riaprono il dialog con l’indirizzo compilato e la password vuota. Riconnettersi allo stesso indirizzo non crea duplicati e conserva il nome scelto.
+For **local or remote directory bookmarks**, keep the **Connections root** in one
+pane and highlight the directory to remember in the other. **Ctrl+X S** or
+**Ctrl+S** adds it to Connections, with either pane focused. The initial name is
+`<directory>.lnk`, renameable with F2. Existing names are never overwritten.
+Without a Connections pane, the shortcut creates a normal link in the current
+directory.
 
-**Segnalibri a cartelle locali o remote**: tenere la **super-root Connessioni** in un pannello e selezionare nell’altro la cartella da ricordare. **Ctrl+X S** (anche **Ctrl+S**) aggiunge il collegamento alla super-root; funziona con il focus su uno qualsiasi dei due pannelli. Il nome iniziale è `<cartella>.lnk`, modificabile con **F2**. Nomi esistenti non vengono sovrascritti. Senza la super-root nel pannello opposto, Ctrl+X S conserva la normale creazione del link nella cartella corrente.
+Bookmarks are real symbolic links under
+`${XDG_CONFIG_HOME:-$HOME/.config}/fm/shortcuts/`. Local targets are absolute paths;
+SSH/FTP targets are URIs containing the endpoint and remote path, never a password.
+Manually added links are displayed too. Enter/Right/double-click opens the target.
+Remote bookmarks reuse known mounts; after restart/disconnection they reopen the
+prefilled connection dialog, then enter the saved directory. Passwords use the
+keyring as for other connections. **F8** removes only the link after confirmation,
+leaving the target and its contents intact. Broken local links remain visible and
+can be renamed or deleted; their target appears in the status bar.
 
-I segnalibri sono veri link simbolici in `${XDG_CONFIG_HOME:-$HOME/.config}/fm/shortcuts/`: per le cartelle locali puntano al percorso assoluto, per SSH/FTP a un URI con indirizzo e percorso remoto, senza password. Sono mostrati anche i link aggiunti manualmente qui. **Invio**, **Destra** o doppio clic aprono la destinazione. I segnalibri remoti riusano la connessione già conosciuta; dopo un riavvio o una disconnessione riaprono il dialog precompilato, poi entrano nella cartella salvata. La password viene gestita dal portachiavi come per le altre connessioni. **F8** elimina solo il collegamento dopo conferma, lasciando intatti cartella e contenuto. I link locali interrotti restano visibili e possono essere rinominati o eliminati; la destinazione compare nella riga di stato.
+Profiles contain only protocol, address and name under
+`${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections/`, with permissions `0600`.
+Last addresses from the previous version are imported once; deleted entries are
+not recreated automatically. Successful connections also update `fm/last-ssh`
+and `fm/last-ftp`, with permissions `0600`.
 
-Le connessioni salvate contengono soltanto protocollo, indirizzo e nome, in `${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections/`, con permessi 0600. Gli ultimi indirizzi della versione precedente vengono importati una volta; le voci eliminate non vengono ricreate automaticamente.
+**Passwords are never written to fm files, process arguments or environment
+variables**. They pass through an anonymous file descriptor; GVfs stores them in
+the **system keyring** using
+[PasswordSave.PERMANENTLY](https://docs.gtk.org/gio/enum.PasswordSave.html).
+The empty password field never displays the secret: GVfs retrieves it while
+connecting. The keyring must be available and unlocked and may show its own unlock
+dialog. Without a keyring, typed-password connections remain possible, but fm
+never creates plaintext copies. Manage credentials with Passwords and Keys
+(Seahorse); F8 only deletes the fm profile.
 
-Dopo un collegamento riuscito viene ricordato l’ultimo indirizzo per protocollo nei file `${XDG_CONFIG_HOME:-$HOME/.config}/fm/last-ssh` e `last-ftp`, con permessi 0600. **La password non viene scritta nei file di fm, negli argomenti dei processi o nelle variabili d’ambiente**: passa tramite un descrittore anonimo e GVfs la conserva nel **portachiavi di sistema**, usando [PasswordSave.PERMANENTLY](https://docs.gtk.org/gio/enum.PasswordSave.html). Aprendo nuovamente il dialog, l’indirizzo è già compilato e la password è vuota. Il campo vuoto non mostra il segreto: GVfs lo recupera dal portachiavi durante la connessione. Il portachiavi deve essere disponibile e sbloccato; può chiedere lo sblocco con il suo dialog. Se non è disponibile, la connessione con password digitata resta possibile ma fm non crea copie in chiaro. Per gestire o eliminare le credenziali usare Password e chiavi (Seahorse); F8 elimina soltanto la voce dall’elenco di fm.
+Remote directories support normal navigation, selection, F5/F6 and file commands.
+Left from the remote root returns to Connections. Panes may mix local and remote
+directories. FTP copies do not preserve Unix attributes; moves across mounts remove
+the source only after a successful copy. Remote permissions apply; server refusals
+do not trigger local sudo. GVfs session mounts can be shared with other applications
+and may remain connected after fm exits.
 
-Le cartelle remote si navigano come quelle locali; dalla radice remota Sinistra torna a Connessioni. I pannelli possono mostrare contemporaneamente cartelle locali e remote, con selezione, F5/F6 e gli altri comandi sui file. Su FTP la copia trasferisce i contenuti senza richiedere la conservazione di attributi Unix; uno spostamento tra mount diversi elimina l’origine soltanto dopo una copia riuscita. Valgono i permessi dell’utente remoto: un rifiuto del server non richiede sudo locale. Le connessioni sono mount della sessione GVfs, condivisibili con le altre applicazioni, e possono rimanere attive dopo l’uscita da fm.
+Optional remote support requires **`/usr/bin/python3`, `python3-gi`, `gvfs-backends`,
+`gvfs-fuse`**, FUSE and an active user D-Bus session. Local operations remain usable
+without these dependencies.
 
-Il supporto remoto opzionale richiede **`/usr/bin/python3`, `python3-gi`, `gvfs-backends`, `gvfs-fuse`**, FUSE e un bus D-Bus utente attivo. Su questo PC sono già disponibili. Il filesystem locale continua a funzionare senza queste dipendenze.
+## Archives and symbolic links
 
-## Archivi e link simbolici
+**Enter**, **Right** or double-click opens an archive like a directory. Recognized
+extensions include ZIP, TAR (also GZ, BZ2, XZ and ZST), TGZ, TBZ/TBZ2, TXZ, TZST,
+7Z and RAR. Actual support depends on installed libarchive/GVfs backends. Some
+7Z/RAR files require seeking that the backend cannot provide and report an error.
+Paths display as `archive.zip!/directory`. Left, Backspace or `..` from the archive
+root returns to its containing directory and highlights the archive.
 
-**Invio**, **Destra** o doppio clic su un archivio aprono i contenuti come una cartella. Sono riconosciuti ZIP, TAR (anche GZ, BZ2, XZ e ZST), TGZ, TBZ/TBZ2, TXZ, TZST, 7Z e RAR; la lettura dei singoli formati dipende da libarchive/GVfs installati. Alcuni 7Z/RAR richiedono operazioni di seek non disponibili nel backend e vengono segnalati come non supportati. Il percorso usa `archivio.zip!/cartella`. Dalla radice dell’archivio, **Sinistra**, Backspace o `..` tornano alla cartella di provenienza evidenziando l’archivio.
+**F3/Ins/Space** marks entries; **F5** copies files/directories outside the archive,
+including into the other pane. Archive navigation is **read-only**: rename, edit,
+move, delete, creation, attributes and commands menus are disabled inside; copying
+new files into an archive is also blocked. To edit contents, copy them into an
+ordinary directory first. The original archive remains unchanged.
 
-**F3/Ins/Spazio** selezionano e **F5** copia file o cartelle all’esterno, anche nel pannello opposto. La navigazione è in sola lettura: rinomina, editor, spostamento, cancellazione, creazione, attributi e menu comandi sono disabilitati dentro l’archivio; non è possibile copiarvi nuovi file. L’originale rimane invariato. Per modificare i contenuti, copiarli prima in una cartella normale.
+Nested archives and archives on remote mounts are supported by copying only the
+compressed file being opened into a private temporary directory, without extracting
+the entire archive. Private mounts and copies are removed on exit. Archive links
+may be followed only within the archive. Damaged/unsupported archives report an
+error; encrypted archive password entry is not supported. Requires `gvfsd-archive`
+from `gvfs-backends`, plus the GIO/FUSE stack used for SSH/FTP.
 
-Si possono aprire anche archivi annidati e presenti nei pannelli remoti: viene copiato in una directory temporanea privata solo il file compresso da aprire, senza estrarne tutto il contenuto. Le copie temporanee vengono smontate e rimosse alla chiusura di fm. I link contenuti negli archivi possono essere seguiti solo se restano al loro interno. Archivi danneggiati o non supportati mostrano un errore; non è previsto l’inserimento di password per archivi cifrati. Il supporto richiede il backend `gvfsd-archive`, incluso in `gvfs-backends`, oltre allo stack GIO/FUSE già usato per FTP e SSH.
+Highlighting a **symbolic link** shows **`Link -> target`** in the status bar,
+including broken links. It displays the stored relative or absolute target.
+Selecting another entry restores navigation help; operation messages occupy the
+line below.
 
-Quando la riga evidenziata è un **link simbolico**, la barra in basso mostra **`Link -> destinazione`**, anche per i link interrotti. La destinazione è quella memorizzata nel collegamento, relativa o assoluta; selezionando un’altra voce ritorna l’aiuto di navigazione. I messaggi delle operazioni restano nella riga sottostante.
+## F1 commands menu
 
-## Menu comandi su F1
+**F1** reads the personal MC menu from `${XDG_CONFIG_HOME:-$HOME/.config}/mc/menu`,
+falling back to `/etc/mc/mc.menu`. Entries and customizations are read every time,
+including `.deb` installation, touch and ZIP commands if present. Entry-specific
+programs must be installed. Personal menu labels and prompts retain their original
+language.
 
-**F1** apre il menu personale di MC da `${XDG_CONFIG_HOME:-$HOME/.config}/mc/menu`, oppure quello di sistema `/etc/mc/mc.menu`. Le voci e le loro personalizzazioni sono lette a ogni apertura: sono disponibili anche installazione `.deb`, touch e ZIP se presenti nel proprio menu. I programmi richiesti dalle singole voci devono essere installati.
+**Up/Down**, **PgUp/PgDn**, **Home/End** select entries; **Enter**, the entry hotkey
+or **Run** starts one. Mouse selection, double-click, wheel and buttons work too.
+Esc cancels. MC conditions filter entries by name, directory, file type, selection
+and executable availability, respecting `shell_patterns=0/1` and default choices.
 
-**Su/Giù**, **PgUp/PgDn**, **Home/End** scelgono una voce; **Invio**, il suo carattere di scelta rapida o il pulsante **Esegui** la avviano. Il mouse permette selezione, doppio clic, rotella e pulsanti. **Esc** annulla. Il menu filtra le voci secondo le condizioni MC su nome, directory, tipo di file, selezione e disponibilità degli eseguibili, rispettando `shell_patterns=0/1` e le condizioni di scelta predefinita.
+Menu scripts run in Bash in the active pane directory. Supported macros are
+`%f`/`%p` (current file), `%d` (directory), `%s` (marks or current file), `%t`
+(marks), `%u` (marks to clear), their uppercase equivalents for the other pane,
+`%%` and `%{prompt}`. Names are shell-quoted; `%0`/`%1` control quoting as in MC.
+`%view{...}` sends output to `$PAGER` (default `less`); other commands leave output
+in the terminal and wait for Enter. Scripts containing `sudo` keep their own
+authentication prompts. The source MC menu is never modified.
 
-Gli script del menu vengono eseguiti con Bash nella directory del pannello attivo. Sono supportate le macro `%f`/`%p` (file corrente), `%d` (directory), `%s` (marcati oppure file corrente), `%t` (marcati), `%u` (marcati da smarcare), le corrispondenti maiuscole per l’altro pannello, `%%` e `%{richiesta}`. I nomi sono protetti per la shell; `%0` e `%1` controllano il quoting come in MC. `%view{...}` invia l’output a `$PAGER` (default `less`); gli altri comandi lasciano il risultato nel terminale e attendono Invio. Le voci che contengono `sudo` mantengono la richiesta di autenticazione del loro script.
+## Execution and attributes
 
-## Esecuzione e gestione degli attributi
+**Enter/Right/double-click** runs regular executable files directly, without eval.
+The child receives the normal terminal on stdin/stdout/stderr; fm waits for Enter
+when it finishes, then restores the TUI. Other regular files open with the desktop's
+default MIME application through **`gio open`**: PDFs in a PDF reader, images in
+an image viewer, text in the associated editor. Existing MIME associations are
+respected and never changed. Archives keep opening inside fm. Single-click only
+selects the row.
 
-Premendo **Invio** oppure **freccia destra** su un file regolare con permesso di esecuzione, `fm` lo avvia direttamente, senza usare `eval`. Il programma figlio riceve il terminale normale con **stdin, stdout e stderr**; alla sua uscita il file manager attende Invio prima di ripristinare la TUI. **Invio**, **freccia destra** e **doppio clic** su un file regolare senza permesso di esecuzione lo aprono con l’applicazione predefinita del desktop, tramite **`gio open`**: per esempio PDF nel lettore PDF, immagini nel visualizzatore e testo nell’editor associato. Il sistema riconosce il tipo MIME usando estensione e contenuto; `fm` rispetta le associazioni esistenti e non le modifica. Gli archivi continuano ad aprirsi dentro `fm`. Il clic singolo seleziona soltanto la riga.
+MIME opening requires `gio` (`libglib2.0-bin` on Debian/Ubuntu/Mint) and an associated
+application. The file manager stays usable while the application runs. Missing
+associations or launch failures appear in the status line. Change associations
+through desktop preferences or `xdg-mime default name.desktop type/mime`.
 
-L’apertura MIME richiede il comando `gio` (`libglib2.0-bin` su Debian/Ubuntu/Mint) e un’applicazione associata al tipo di file. Il file manager resta utilizzabile mentre l’applicazione esterna è aperta. Se manca un’associazione o il lancio fallisce, il motivo compare nella riga di stato. Per cambiare l’app usare le preferenze del desktop oppure `xdg-mime default nome.desktop tipo/mime`. Non vengono aggiunte associazioni personali di `fm`.
+**Ctrl+X C/S** are sequences: press Ctrl+X, release, then `c` for attributes or
+`s` for a symbolic link. The old Ctrl+X O sequence is removed. Ctrl+S is direct.
 
-Le scorciatoie **Ctrl+X C/S** sono *sequenze*: premere `Ctrl+X`, rilasciare, quindi `c` per gli attributi o `s` per il link simbolico. La precedente sequenza Ctrl+X O è rimossa. **Ctrl+S** si preme direttamente.
+- **Rename**: F2 opens the current name and a preselected new-name field. Typing
+  replaces it; arrows, Home/End, Backspace/Delete edit, Ctrl+U clears. Tab cycles
+  through the field and Rename/Cancel buttons. Enter confirms, Esc cancels; mouse
+  buttons work too. An unchanged name does nothing; existing names are protected.
+- **Permissions and owner**: Ctrl+X C opens nine **r/w/x** boxes for User, Group,
+  Others, an octal field and **Users/Groups** lists from `getent`. Tab cycles the
+  grid, users, groups and Apply/Cancel buttons. In the grid, arrows move and Space
+  toggles a box; modes such as `755` or `0644` can be typed. Lists support arrows,
+  PgUp/PgDn and Home/End; names, IDs or `user:group` can also be typed. Mouse selects
+  boxes, entries and buttons. On short terminals Tab alternates the grid and lists
+  in the same space. **Enter applies only changed fields; Esc cancels everything.**
+- Rename, copy, move, mkdir/link creation, deletion, `chmod` and `chown` retry
+  authorization errors with **sudo**, temporarily returning to the normal terminal.
+  Only sudo reads the password; fm never reads or stores it. **Ctrl+C** cancels
+  authentication and returns to fm. Other errors, such as an invalid user, do not
+  request sudo. Results depend on the user's sudo privileges. Deletion confirmation
+  and overwrite protection remain active. Ownership is applied before permissions
+  to preserve requested special bits. chmod/chown are nonrecursive; chmod skips
+  symbolic links.
+- **Symbolic link** appends `.lnk` to the highlighted entry's full name, for example
+  `file.txt.lnk`, in the current directory, pointing to an **absolute target**.
+  Moving the link does not change its target; moving/deleting the original may
+  break it. Existing files or links are never overwritten.
 
-- **Rinomina**: F2 apre una finestra con nome attuale e campo del nuovo nome già selezionato. Digitare sostituisce il nome; frecce, Home/End, Backspace e Canc permettono di modificarlo, Ctrl+U svuota il campo. **Tab** passa fra campo e pulsanti **Rinomina/Annulla**; Invio conferma, Esc annulla. I pulsanti sono utilizzabili anche con il mouse. Un nome esistente non viene sovrascritto.
-- **Permessi e proprietario**: Ctrl+X C apre una sola finestra con nove caselle **r/w/x** (Utente, Gruppo, Altri), immissione ottale e liste **Utenti/Gruppi** da `getent`. **Tab** scorre griglia, utenti, gruppi e pulsanti **Imposta/Annulla**. Nella griglia, le frecce spostano il cursore e **Spazio** cambia una casella; si può digitare un modo come `755` o `0644`. Nelle liste, **Su/Giù**, **PgUp/PgDn**, **Home/End** selezionano le voci; si possono anche digitare nomi, ID o `utente:gruppo`. Il mouse seleziona caselle, voci e pulsanti. Nei terminali bassi Tab alterna griglia e liste nello stesso spazio. **Invio applica soltanto i campi modificati; Esc annulla tutto**.
-- Se rinomina, copia, spostamento, creazione di cartelle/link, eliminazione, `chmod` o `chown` restituiscono un errore di autorizzazione, `fm` riprova quel comando con **sudo**, passando temporaneamente al terminale normale. La password viene richiesta e gestita da `sudo`, senza essere letta o conservata da `fm`. **Ctrl+C** annulla la richiesta e riporta al file manager. Gli altri errori, come un utente inesistente, non richiedono sudo. Il risultato dipende dalle autorizzazioni sudo dell’utente. Restano la conferma di eliminazione e il blocco delle sovrascritture. Per gli attributi, proprietario e gruppo vengono applicati prima dei permessi; chmod/chown non sono ricorsivi e chmod salta i link simbolici.
-- **Link simbolico** aggiunge `.lnk` al nome completo dell’elemento evidenziato (per esempio `file.txt.lnk`), nella cartella attuale, con **destinazione assoluta** (per esempio `/home/user/Documenti/file.txt`). Spostare il link in un'altra directory **non ne altera la destinazione**; spostare o cancellare il file originale può comunque romperlo. Non sovrascrive link o file preesistenti.
+chmod/chown operate on F3-marked entries, or the current row without marks.
+Link creation always uses only the current row. F4 passes the terminal to the
+editor and restores the TUI afterward. `EDITOR` may include space-separated
+arguments, for example `EDITOR="nano -w"`; it is not interpreted as shell code.
+The editor must be installed.
 
-Le operazioni `chmod` e `chown` si applicano ai file marcati con F3, oppure alla riga corrente se non ci sono marcature. La creazione del link utilizza sempre e soltanto la riga corrente.
+## Redrawing
 
-F4 passa il terminale all’editor e ripristina la TUI alla sua chiusura. `EDITOR` può contenere il comando e argomenti separati da spazi (per esempio `EDITOR="nano -w"`); non viene interpretato come codice shell. Per usare l’editor serve che sia installato.
+Cursor movement redraws only the previous and current rows. Scrolling redraws
+only the active list without reloading the other pane. Queued navigation keys are
+batched before drawing, retaining the next command. Full redraws handle directory
+changes, refresh and resize. The bottom border emits no newline that could scroll
+the screen or misalign mouse coordinates.
 
-## Ridisegno senza sfarfallio
+## Safety and limitations
 
-I movimenti del cursore aggiornano soltanto la riga precedente e quella corrente; il terminale non viene cancellato a ogni pressione di tasto. Il ridisegno completo è riservato a cambio di directory, scorrimento, aggiornamento o ridimensionamento. Il bordo in fondo non invia più un ritorno a capo che faceva scorrere lo schermo e poteva sfalsare le coordinate mouse.
+- **No overwrites**: F2/F5/F6 report existing destinations as failures.
+- F8 performs **permanent recursive deletion** (`rm -rf`) after explicit `y`/`Y`
+  confirmation; it does not use the trash. Empty Enter cancels.
+- Local copy preserves metadata and symbolic links using `cp -a`; move and rename
+  use `mv`. Directories cannot be copied or moved inside themselves.
+- Entries follow shell locale ordering. Long text is truncated; width uses Bash
+  character counts, so double-width Unicode characters may misalign frames.
+- Function-key sequences target common xterm/Linux terminals; graphical terminals
+  may intercept F2–F8 and require shortcut changes.
 
-## Sicurezza e limiti della versione iniziale
+## ai-bar integration
 
-- **Non sovrascrive**: quando il nome di destinazione esiste già, F2, F5 e F6 lasciano invariato l'elemento e lo segnalano come non riuscito.
-- F8 esegue una **cancellazione ricorsiva permanente** (`rm -rf`) dopo una conferma esplicita: **non** usa il cestino.
-- La copia mantiene i metadati e i link simbolici usando `cp -a` (GNU coreutils). Sposta e rinomina usano `mv`.
-- Non si possono copiare directory dentro sé stesse.
-- Le directory sono ordinate secondo la locale della shell; il testo è troncato se troppo lungo. Il calcolo della larghezza usa il numero di caratteri Bash, e per caratteri Unicode a doppia larghezza l'allineamento del bordo può risultare imperfetto.
-- Invio esegue direttamente i file con permesso di esecuzione; gli altri file normali non vengono aperti.
-- Le sequenze dei tasti funzione sono quelle comuni dei terminali xterm e Linux; alcuni terminali grafici possono intercettare F2–F8 e richiedere la riconfigurazione delle scorciatoie.
+Run fm inside an embedded **PTY** or a terminal emulator supporting **xterm SGR
+mouse sequences (1000/1006)**. It uses `/dev/tty`, noncanonical keyboard input,
+standard ANSI sequences and, unless disabled, the alternate screen. Local use does
+not require a GUI or desktop. A future selection mode could print a chosen path
+to stdout; that mode is not implemented.
 
-## Integrazione con ai-bar
+## Tests
 
-Avviare `fm` all'interno di **un PTY** integrato o di un emulatore terminale che supporti le sequenze mouse **xterm SGR (1000/1006)**. Il programma usa `/dev/tty`, la modalità non canonica della tastiera, sequenze ANSI standard e (salvo l'opzione sopra) lo schermo alternativo. Non usa GUI e non necessita dell'ambiente desktop. Per la futura integrazione, si potrà aggiungere una modalità selezione che stampa il percorso scelto su stdout.
-
-## Test
-
-Le operazioni locali usano Bash; il supporto remoto opzionale usa Python 3/GIO. La suite PTY usa soltanto la libreria standard Python:
+Local operations use Bash; optional remote support uses Python 3/GIO. PTY tests
+use only the Python standard library:
 
 ```bash
 bash -n fm
 python3 tests/smoke.py
+shellcheck -S warning fm    # when installed
 ```
 
-I test usano uno pseudo-terminale e directory temporanee per controllare filtro, pannelli indipendenti, Tab, ridimensionamento, rinomina, editor interattivo, selezione multipla/copia, spostamento, creazione, link `.lnk`, cancellazione, mancata sovrascrittura, eventi mouse, doppio click, rotella, pulsanti F2–F8 e interazione durante i prompt.
+Temporary directories and pseudo-terminals cover filtering, independent panes,
+Tab, resize, rename, interactive editors, multiselection, copy/move, mkdir, links,
+deletion, overwrite protection, mouse/double-click/wheel, function buttons, prompts,
+English help and affirmative/default-cancel deletion.
 
-Le prove reali dei protocolli sono separate e facoltative: `tests/remote_integration.py` richiede anche `paramiko`, `pyftpdlib`, `dbus-run-session` e OpenSSH client. Avvia server su loopback con chiavi e directory temporanee, un bus D-Bus separato e un portachiavi disabilitato per i test di base:
+Optional real protocol tests also require `paramiko`, `pyftpdlib`,
+`dbus-run-session` and the OpenSSH client. They run loopback servers with temporary
+keys/directories and an isolated D-Bus session, with the keyring disabled by default:
 
 ```bash
 /usr/bin/python3 tests/remote_integration.py
 ```
 
-Con `--keyring` la stessa prova avvia un portachiavi GNOME temporaneo e verifica salvataggio cifrato, riavvio del portachiavi e riconnessione SSH/FTP senza digitare la password. Richiede anche `gnome-keyring-daemon` e le introspezioni Python `Secret` (`gir1.2-secret-1`); nessuna credenziale o configurazione personale viene utilizzata.
+Add `--keyring` to test encrypted saving, keyring restart and SSH/FTP reconnection
+without typing passwords. Also requires `gnome-keyring-daemon` and Python Secret
+introspection (`gir1.2-secret-1`). Personal credentials/configurations are not used.
 
-La verifica facoltativa degli archivi è separata dalla suite PTY e usa GVfs/FUSE su un bus e percorsi temporanei:
+Optional archive tests use GVfs/FUSE on an isolated bus and temporary paths:
 
 ```bash
 /usr/bin/python3 tests/archive_integration.py
 ```
 
-Verifica ZIP, TAR/GZ/BZ2/XZ, archivi annidati, copia, ritorno e selezione, due pannelli, sola lettura e archivi danneggiati. Con `7z` installato verifica anche la lettura del formato o la segnalazione del limite di seek del backend.
+They cover ZIP, TAR/GZ/BZ2/XZ, nesting, copying, return selection, two panes,
+read-only restrictions and damaged archives. With `7z`, they also test reading
+that format or reporting the backend's seek limitation.
 
-## Licenza
+## License
 
-MIT, vedere [LICENSE](LICENSE).
+MIT; see [LICENSE](LICENSE).

@@ -35,16 +35,19 @@ bash -n fm
 python3 tests/smoke.py
 ```
 
-Quando disponibile, eseguire anche `shellcheck -S warning fm` per il controllo statico.
+When available, also run `shellcheck -S warning fm`. For manual verification run
+`./fm` interactively and quit with F10. Review the diff and update README/this guide
+when structure, public options, invariants or verification commands change.
+Tests use standard Python and temporary directories.
 
-Per una verifica manuale eseguire `./fm` in un terminale interattivo, quindi F10 per uscire. I test usano Python 3 standard e directory temporanee. Controllare il diff e aggiornare questa guida e il README quando cambiano struttura, opzioni pubbliche, invarianti o comandi di verifica.
+Optional remote verification: `/usr/bin/python3 tests/remote_integration.py`, with
+paramiko/pyftpdlib and GVfs. Servers are loopback only; SSH keys/config, D-Bus and
+keyring services are isolated in temporary directories. With `--keyring`, start
+gnome-keyring-daemon on that private bus, with temporary HOME/XDG/control-directory
+and a fixture password. Verify the secret with libsecret, restart the daemon,
+unmount before reconnection and check that keyring files do not contain plaintext
+secrets. Terminate the daemon afterward. Without --keyring, cover connections
+without secret services. Never test credentials or changes on real devices.
 
-Scorciatoie MC: input_key traduce Esc seguito entro 0,50 s da 1…9/0 in F1…F9/F10 (F9 non assegnato) e CSI 2~ (Ins) in F3. Esc da solo mantiene l’annullamento dopo il timeout. In perform_key F3/Ins/Spazio marcano e avanzano; .. resta non selezionabile e sull’ultima riga il cursore si ferma; select_current non sposta il cursore, preservando il comportamento del mouse. Ctrl+H alterna già i nascosti nel pannello attivo.
-
-Scorrimento: draw distingue il cambio scroll dal ridisegno completo e ridipinge solo le righe attive, senza load_pane/reload sul pannello inattivo. Il ciclo principale elabora fino a 256 tasti di navigazione già disponibili prima del ridisegno; conserva ed esegue il primo comando diverso senza scartarlo. Il dialog filtro legge autonomamente ogni carattere, fuori dal ciclo di navigazione. I test coprono decodifica Esc/Ins, Esc e cifra separati, selezione con avanzamento e limiti, raffiche con rinomina successiva su uno/due pannelli.
-
-Apertura MIME: enter_dir mantiene la precedenza directory → archivi → eseguibili; i restanti file regolari passano a open_document tramite Invio/Destra/doppio clic. open_document usa gio open con percorso assoluto quotato, stdin/stdout su /dev/null e stderr in mktemp per riportare l’errore sanificato nella notice senza sporcare la TUI. Nessun eval, tabella di estensioni o modifica delle associazioni. GIO è una dipendenza opzionale (libglib2.0-bin); gli eseguibili conservano run_executable e il terminale interattivo. I link interrotti non raggiungono il launcher; resta il controllo dei link esterni agli archivi. I test PTY intercettano solo gio open per evitare app personali, delegando gli altri sottocomandi al GIO reale; una prova separata usa il GIO reale con desktop entry e associazione PDF in XDG temporanei, senza cambiare le preferenze personali.
-
-Segnalibri in Connessioni: shortcuts_dir punta a fm/shortcuts nella configurazione XDG; reload aggiunge solo veri link simbolici, anche interrotti, dopo i profili remoti. Con due pannelli e la super-root in uno, Ctrl+X S/Ctrl+S chiama add_shortcut sulla cartella evidenziata nell’altro, indipendentemente dal focus. Nome iniziale basename.lnk, nessuna sovrascrittura; senza super-root create_symlink conserva il comportamento normale. Link locali a percorsi fisici assoluti; link remoti a URI sftp:// o ftp:// con percorso quotato, mai credenziali. remote_addresses affianca remote_labels/protocols per ricostruire l’endpoint; open_shortcut decodifica l’URI, riusa mount noti oppure chiama connect_remote con il percorso remoto aggiuntivo. Quest’ultimo mantiene dialog/password/portachiavi e salva il normale profilo dell’endpoint. F2 riusa rename_item con destinazione shortcuts_dir nel menu virtuale; F8 usa rm senza -r e conferma per eliminare solo il link. I test PTY coprono entrambi i focus e la persistenza; remote_integration.py verifica creazione/riuso/riavvio/disconnessione/riconnessione e rimozione su SFTP password/chiave e FTP, con spazi/Unicode nel percorso.
-
-? apre show_help durante la navigazione e in Connessioni; nel dialog filtro rimane un carattere letterale. La modale legge usage, impagina con fold GNU alla larghezza disponibile e supporta frecce/Pg/Home/End, rotella, resize e pulsante Chiudi. Invio/Esc/?/F10 chiudono l’aiuto, senza uscire da fm. Testare creazione/apertura/persistenza/rinomina/eliminazione sicura dei link, link preesistenti/interrotti/duplicati e aiuto con scorrimento/resize/ritorno.
+Optional archives: `/usr/bin/python3 tests/archive_integration.py`, using only
+fixtures and an isolated bus/runtime. Do not touch personal mounts.

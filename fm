@@ -1,45 +1,45 @@
 #!/usr/bin/env bash
-# fm: file manager a uno o due pannelli, senza librerie TUI esterne.
-# Richiede Bash >= 4 (array associativi), stty e i comandi GNU di base.
+# fm: one- or two-pane file manager without external TUI libraries.
+# Requires Bash >= 4 (associative arrays), stty and basic GNU commands.
 set -u
 
 usage() {
     cat <<'HELP'
-Uso: fm [DIRECTORY]
+Usage: fm [DIRECTORY]
 
-File manager TUI a uno o due pannelli (Bash, senza ncurses).
+One- or two-pane TUI file manager (Bash, no ncurses).
 
- Frecce Su/Giu                   seleziona la riga (stile Lynx)
- Freccia Destra / Invio           apre directory/file (MIME) o avvia eseguibili
- Freccia Sinistra / Backspace     torna al padre sulla cartella lasciata
- PgUp / PgDn / Home / End         navigazione veloce
- F1                               menu comandi di Midnight Commander
- F2                               rinomina il file o la directory
- F3 / Ins / Spazio                seleziona/deseleziona e passa alla riga seguente
- F4                               edita con $EDITOR (oppure nano)
- F5                               copia nell’altro pannello (o chiede destinazione)
- F6                               sposta nell’altro pannello (o chiede destinazione)
- F7                               crea una directory
- Ctrl+X S con super-root opposta  aggiunge la cartella selezionata ai segnalibri
- F2 / F8 in Connessioni           rinomina / elimina solo profilo o collegamento
- F8                               cancella (chiede conferma)
- F10                              esci dal file manager
- ?                                istruzioni e scorciatoie (finestra scorrevole)
- Esc poi 1...9 / 0 (entro 0,5 s)  equivale a F1...F9 / F10 (F9 non assegnato)
- Ctrl+X poi C                     permessi, proprietario e gruppo
- Ctrl+X poi S                     crea un link simbolico (anche Ctrl+S)
- Ctrl+S                           crea link assoluto <nome>.lnk
- Ctrl+F                           dialog filtro per nome file e testo contenuto
- Ctrl+H                           mostra/nasconde file e cartelle nascosti
- Tab                              cambia pannello (da 100 colonne)
- Mouse click                      seleziona / doppio click apre
- Rotella mouse                    scorre l'elenco
- r                                aggiorna la lista
+ Up / Down arrows                select a row (Lynx style)
+ Right arrow / Enter             open directory/file (MIME) or run executable
+ Left arrow / Backspace          go to parent, highlighting the directory left
+ PgUp / PgDn / Home / End         navigate quickly
+ F1                              Midnight Commander commands menu
+ F2                              rename file or directory
+ F3 / Ins / Space                select/unselect and advance to the next row
+ F4                              edit with $EDITOR (or nano)
+ F5                              copy to other pane (or ask for destination)
+ F6                              move to other pane (or ask for destination)
+ F7                              create a directory
+ Ctrl+X S with connections root  bookmark the directory in the other pane
+ F2 / F8 in Connections          rename / delete only the profile or shortcut
+ F8                              delete (asks for confirmation)
+ F10                             quit the file manager
+ ?                               help and shortcuts (scrollable window)
+ Esc then 1...9 / 0 (within 0.5s) same as F1...F9 / F10 (F9 unassigned)
+ Ctrl+X then C                   permissions, owner and group
+ Ctrl+X then S                   create a symbolic link (also Ctrl+S)
+ Ctrl+S                          create absolute link <name>.lnk
+ Ctrl+F                          filter dialog for file name and content text
+ Ctrl+H                          show/hide hidden files and directories
+ Tab                             switch pane (from 100 columns)
+ Mouse click                     select / double-click to open
+ Mouse wheel                     scroll the list
+ r                               refresh the list
 
-Opzioni d'ambiente:
- ABFM_NO_ALT_SCREEN=1             non usare lo schermo alternativo
- ABFM_NO_COLOR=1                  disabilita i colori ANSI
- ABFM_ASCII=1                     forza cornici ASCII al posto del box drawing
+Environment options:
+ ABFM_NO_ALT_SCREEN=1             do not use the alternate screen
+ ABFM_NO_COLOR=1                  disable ANSI colors
+ ABFM_ASCII=1                     use ASCII frames instead of box drawing
 HELP
 }
 
@@ -52,19 +52,19 @@ if (( $# > 1 )); then
     exit 2
 fi
 if [[ ! -t 0 || ! -t 1 || ! -r /dev/tty ]]; then
-    printf 'fm: eseguire in un terminale interattivo.\n' >&2
+    printf 'fm: run in an interactive terminal.\n' >&2
     exit 1
 fi
 if ! command -v stty >/dev/null 2>&1; then
-    printf 'fm: stty non disponibile.\n' >&2
+    printf 'fm: stty is not available.\n' >&2
     exit 1
 fi
 if ! cwd=$(cd -P -- "${1:-.}" 2>/dev/null && pwd -P); then
-    printf 'fm: directory non accessibile: %s\n' "${1:-.}" >&2
+    printf 'fm: cannot access directory: %s\n' "${1:-.}" >&2
     exit 1
 fi
 
-# Manteniamo aperto /dev/tty: input e output rimangono affidabili anche in pipe.
+# Keep /dev/tty open: input and output remain reliable even with pipes.
 exec 9<>/dev/tty
 original_tty=$(stty -g <&9) || exit 1
 alt_screen=1
@@ -73,7 +73,7 @@ mouse_enabled=0
 declare -a entries=() targets=()
 declare -A marks=()
 declare -a action_keys=() action_starts=() action_ends=()
-notice='Lynx: Su/Giu scegli, Destra apre, Sinistra torna. F10 esce.'
+notice='Lynx: Up/Down select, Right opens, Left goes back. F10 exits.'
 cursor=0
 scroll=0
 rows=24 cols=80 visible=12 inner=78
@@ -84,11 +84,11 @@ last_click_path=''
 MOUSE_BTN=0; MOUSE_X=0; MOUSE_Y=0; MOUSE_ACTION=''
 PENDING_CHAR=''
 active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' content_filter='' show_hidden=1 resized=0
-# Stato delle due viste; la cronologia e' distinta per pannello e cartella.
+# State of both views; history is separate for each pane and directory.
 declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '') pane_contents=('' '') pane_hidden=(1 1)
 declare -A search_cache=() search_counts=()
 declare -A pane_marks=() directory_focus=() directory_scroll=() directory_marks=()
-# Origine dell'ultima marcatura esplicita, usata da F5/F6 a pannello unico.
+# Source of the last explicit selection, used by F5/F6 in single-pane mode.
 connections_root='@connections'
 connections_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm/connections
 shortcuts_dir=${XDG_CONFIG_HOME:-$HOME/.config}/fm/shortcuts
@@ -96,7 +96,7 @@ declare -A connection_names=() connection_protocols=() connection_addresses=()
 declare -A remote_labels=() remote_protocols=() remote_addresses=() archive_sources=() archive_cache=()
 archive_pending_cache=''
 declare -a selection_sources=('' '')
-# Coordinate di rendering: righe salvate per evitare redraw completi.
+# Rendering coordinates: remember rows to avoid full redraws.
 needs_full=1
 painted_rows=0 painted_cols=0 painted_scroll=-1 painted_cursor=-1
 painted_notice='' painted_status=''
@@ -112,13 +112,13 @@ init_theme() {
     [[ -n ${NO_COLOR:-} || ${ABFM_NO_COLOR:-0} == 1 || ${TERM:-} == dumb ]] && USE_COLOR=0
     [[ ${ABFM_ASCII:-0} == 1 ]] && USE_UNICODE=0
     [[ $locale != *UTF-8* && $locale != *utf8* && $locale != *utf-8* ]] && USE_UNICODE=0
-    # Palette del riferimento con colori per tipo file, ANSI 256 colori.
+    # Reference palette with file type colors, ANSI 256 colors.
     if (( USE_COLOR )); then
         CLR_RESET=$'\033[0m'
         CLR_DIALOG=$'\033[0;38;5;252;48;5;239m'
         CLR_DIALOG_TITLE=$'\033[1;38;5;180;48;5;239m'
         CLR_DIALOG_FOCUS=$'\033[1;38;5;228;48;5;23m'
-        # Pannello grigio scuro, testo giallo tenue e cursore petrolio.
+        # Dark gray pane, muted yellow text and teal cursor.
         CLR_PANEL=$'\033[38;5;144;48;5;237m'
         CLR_BORDER=$'\033[38;5;144;48;5;237m'
         CLR_HEADER=$'\033[1;33;48;5;237m'
@@ -207,7 +207,7 @@ border() {
         *) left=$C_LT; right=$C_RT ;;
     esac
     if [[ $kind == bottom ]]; then
-        # Niente CRLF dalla cella finale: evita scroll e disallineamenti SGR.
+        # No CRLF from the final cell: avoid scrolling and SGR misalignment.
         printf '%s%s%s%s%s' "$CLR_BORDER" "$left" "$d" "$right" "$CLR_RESET" >&9
     else
         printf '%s%s%s%s%s\r\n' "$CLR_BORDER" "$left" "$d" "$right" "$CLR_RESET" >&9
@@ -225,7 +225,7 @@ size() {
     visible=$((rows-8))
 }
 
-# Lo stato del pannello attivo resta nelle variabili usate dalle operazioni.
+# The active pane state stays in the variables used by file operations.
 pane_geometry() {
     pane_x=1; pane_width=$cols
     if (( dual_pane )); then
@@ -278,7 +278,7 @@ switch_pane() {
 filter_items() {
     local name=$filter text=$content_filter focus=0 pos=${#filter} key value width offset style i x y
     while :; do
-        modal_frame 'Filtro' 72 12
+        modal_frame 'Filter' 72 12
         width=$((modal_w-8))
         for i in 0 1; do
             if (( i == 0 )); then value=$name; else value=$text; fi
@@ -287,36 +287,36 @@ filter_items() {
                 style=$CLR_CURSOR
                 (( pos>=width )) && offset=$((pos-width+1))
             fi
-            if (( i == 0 )); then modal_line 1 'Nome file:' "$CLR_DIALOG_TITLE"
-            else modal_line 4 'Testo contenuto:' "$CLR_DIALOG_TITLE"; fi
+            if (( i == 0 )); then modal_line 1 'File name:' "$CLR_DIALOG_TITLE"
+            else modal_line 4 'Content text:' "$CLR_DIALOG_TITLE"; fi
             modal_text "$((2+i*3))" 4 "$width" "${value:offset:width}" "$style"
         done
-        modal_line 7 'Tab: campo  Invio: cerca  Esc: annulla'
+        modal_line 7 'Tab: field  Enter: search  Esc: cancel'
         modal_rule 8
-        modal_buttons "$((focus-2))" 'Cerca'
+        modal_buttons "$((focus-2))" 'Search'
         if (( focus<2 )); then
             offset=0; (( pos>=width )) && offset=$((pos-width+1))
             printf '\033[%d;%dH\033[?25h' "$((modal_y+2+focus*3))" "$((modal_x+4+pos-offset))" >&9
         fi
         if ! input_key; then
             printf '\033[?25l' >&9
-            modal_cancel 'Filtro annullato.'; return
+            modal_cancel 'Filter cancelled.'; return
         fi
         printf '\033[?25l' >&9
         key=$KEY
         case $key in
-            ESC|F10) modal_cancel 'Filtro annullato.'; return;;
+            ESC|F10) modal_cancel 'Filter cancelled.'; return;;
             TAB|UP|DOWN)
                 if [[ $key == TAB ]]; then focus=$(((focus+1)%4)); else focus=$((1-focus%2)); fi
                 if (( focus == 0 )); then pos=${#name}; else pos=${#text}; fi
                 ;;
             ENTER)
-                if (( focus==3 )); then modal_cancel 'Filtro annullato.'; return; fi
+                if (( focus==3 )); then modal_cancel 'Filter cancelled.'; return; fi
                 filter=$name; content_filter=$text; cursor=1; scroll=0
-                notice='Ricerca nella cartella corrente...'; needs_full=1
+                notice='Searching the current directory...'; needs_full=1
                 printf '\033[%d;1H%s' "$((rows-1))" "$notice" >&9
                 reload
-                notice="Risultati: $((${#entries[@]}-1)). Invio apre, Esc rimuove il filtro."
+                notice="Results: $((${#entries[@]}-1)). Enter opens, Esc clears the filter."
                 return
                 ;;
             MOUSE)
@@ -327,7 +327,7 @@ filter_items() {
                         if (( focus==0 )); then pos=${#name}; else pos=${#text}; fi
                     elif modal_button_at; then
                         if [[ $REPLY == apply ]]; then focus=2; PENDING_CHAR=$'\r'
-                        else modal_cancel 'Filtro annullato.'; return; fi
+                        else modal_cancel 'Filter cancelled.'; return; fi
                     fi
                 fi
                 ;;
@@ -367,15 +367,15 @@ clear_filter() {
     for i in "${!entries[@]}"; do
         if [[ ${entries[i]} == "$current" ]]; then cursor=$i; break; fi
     done
-    # Mantieni l'elemento sulla stessa riga anche per il secondo clic del mouse.
+    # Keep the item on the same row for the second mouse click too.
     scroll=$((cursor-offset))
     (( scroll < 0 )) && scroll=0
-    notice='Filtro rimosso.'
+    notice='Filter cleared.'
 }
 
 now_millis() {
-    # EPOCHREALTIME segue LC_NUMERIC: in italiano puo' usare la virgola!
-    # Non interpretare la stringa originale come intero Bash (bug riga 194).
+    # EPOCHREALTIME follows LC_NUMERIC: Italian locales may use a comma!
+    # Do not interpret the original string as a Bash integer (former line 194 bug).
     local stamp=${EPOCHREALTIME:-} sec frac
     stamp=${stamp/,/.}
     if [[ $stamp =~ ^([0-9]+)\.([0-9]{1,6})$ ]]; then
@@ -385,7 +385,7 @@ now_millis() {
         while (( ${#frac} < 3 )); do frac+="0"; done
         printf '%s\n' "$((10#$sec * 1000 + 10#$frac))"
     else
-        # Bash < 5 o orologio non disponibile: secondi dal printf builtin.
+        # Bash < 5 or clock unavailable: seconds from the printf builtin.
         printf -v sec '%(%s)T' -1
         printf '%s\n' "$((10#$sec * 1000))"
     fi
@@ -425,7 +425,7 @@ reload() {
     (( cursor >= ${#entries[@]} )) && cursor=$((${#entries[@]}-1))
     (( cursor < 0 )) && cursor=0
     (( scroll > cursor )) && scroll=$cursor
-    # I segni di selezione sono locali alla directory visualizzata.
+    # Selection marks are local to the displayed directory.
     marks=()
     needs_full=1
 }
@@ -438,12 +438,12 @@ sync_scroll() {
 
 render_actions() {
     local -a segs=(
-        '[F1] Menu' '[F2] Rinom.' '[F3] Selez.' '[F4] Edita' '[F5] Copia' '[F6] Sposta' '[F7] CreaDir' '[F8] Elimina' '[F10] Esci'
+        '[F1] Menu' '[F2] Rename' '[F3] Select' '[F4] Edit' '[F5] Copy' '[F6] Move' '[F7] Mkdir' '[F8] Delete' '[F10] Quit'
     )
-    # Barra MC: tasti evidenziati su ciano, comandi su fondo nero.
+    # MC bar: highlighted keys on teal, commands on a dark background.
     action_keys=(F1 F2 F3 F4 F5 F6 F7 F8 F10)
     if (( inner < 113 )); then
-        segs=('1Menu' '2Rin' '3Sel' '4Ed' '5Cop' '6Spo' '7Dir' '8Del' '10Esci')
+        segs=('1Menu' '2Ren' '3Sel' '4Ed' '5Cpy' '6Mov' '7Dir' '8Del' '10Quit')
         if (( inner < 55 )); then
             segs=('1U' '2R' '3S' '4E' '5C' '6M' '7D' '8X' '10Q')
         fi
@@ -480,7 +480,7 @@ render_actions() {
     printf '%s%s%s\r\n' "$CLR_BORDER" "$C_V" "$CLR_RESET" >&9
 }
 
-# Le colonne mantengono la stessa posizione anche con nomi lunghi.
+# Columns keep the same position even with long names.
 entry_columns() {
     local name=$1 bytes=$2 modified=$3 style=$4 name_width=$((inner-28))
     fit "$name" "$name_width"
@@ -491,11 +491,11 @@ entry_columns() {
 }
 
 column_header() {
-    entry_columns ' Nome' 'Dimensione' 'Ultima modifica' "$CLR_HEADER"
+    entry_columns ' Name' 'Size' 'Last modified' "$CLR_HEADER"
 }
 
-# Stampa la riga visibile nella posizione reale del terminale (1-based).
-# Y=4 e' la prima riga, dopo cornice, titolo e intestazioni.
+# Print the visible row at its actual terminal position (1-based).
+# Y=4 is the first row, after the frame, title and headings.
 paint_entry() {
     local idx=$1 n item label selected kind row_style metadata bytes modified epoch
     (( idx >= scroll && idx < scroll+visible )) || return 0
@@ -513,8 +513,8 @@ paint_entry() {
     label=${item##*/}
     if [[ $cwd == "$connections_root" ]]; then
         case $item in
-            local) label='Questo PC';; ssh) label='SSH';; ftp) label='FTP';;
-            profile:*) label=${connection_names[${item#profile:}]:-Connessione};;
+            local) label='This PC';; ssh) label='SSH';; ftp) label='FTP';;
+            profile:*) label=${connection_names[${item#profile:}]:-Connection};;
         esac
         kind='/'; row_style=$CLR_DIR
         if [[ $item == "$shortcuts_dir/"* ]]; then
@@ -562,7 +562,7 @@ draw_panel() {
     display_path "$cwd"
     title=" $REPLY"
     (( drawing_pane == active_pane )) && title=" * $REPLY"
-    [[ -n $filter || -n $content_filter ]] && title+=" [Filtro: $filter${content_filter:+ | Testo: $content_filter}]"
+    [[ -n $filter || -n $content_filter ]] && title+=" [Filter: $filter${content_filter:+ | Text: $content_filter}]"
     printf '\033[1;%dH' "$pane_x" >&9
     border top
     printf '\033[2;%dH' "$pane_x" >&9
@@ -580,11 +580,11 @@ selection_status() {
         safe "$target"
         REPLY=" Link -> $REPLY"
     elif [[ $cwd == "$connections_root" ]]; then
-        REPLY=' Ctrl+X S: segnalibro dal pannello opposto | F2/F8: modifica | ?: istruzioni'
+        REPLY=' Ctrl+X S: bookmark from other pane | F2/F8: edit | ?: help'
     elif (( dual_pane )); then
-        REPLY=' Tab: cambia lato | ?: Aiuto e scorciatoie | Ctrl+F: filtro | F5/F6: trasferisci nel pannello opposto'
+        REPLY=' Tab: switch pane | ?: Help and shortcuts | Ctrl+F: filter | F5/F6: transfer to other pane'
     else
-        REPLY=' Frecce: naviga | Ctrl+F: filtro | ?: istruzioni | F10: esci'
+        REPLY=' Arrows: navigate | Ctrl+F: filter | ?: help | F10: quit'
     fi
 }
 
@@ -610,7 +610,7 @@ draw() {
     local i status_text
     size
     if (( rows < 12 || cols < 35 )); then
-        printf '\033[H\033[2JTerminale troppo piccolo (minimo 35x12).\r\n' >&9
+        printf '\033[H\033[2JTerminal too small (minimum 35x12).\r\n' >&9
         needs_full=1
         painted_rows=$rows; painted_cols=$cols
         return
@@ -622,15 +622,15 @@ draw() {
     selection_status; status_text=$REPLY
 
     if (( needs_full || rows != painted_rows || cols != painted_cols )); then
-        # Riscrive alle posizioni fisse senza pulire tutto lo schermo.
-        # Il bordo inferiore non emette CRLF, eliminando lo scroll terminale.
+        # Rewrite at fixed positions without clearing the entire screen.
+        # The bottom border emits no CRLF, preventing terminal scrolling.
         if (( dual_pane )); then
             draw_dual
         else
             printf '\033[H' >&9
             border top
             display_path "$cwd"
-            line_text " fm  $REPLY${filter:+ [Nome: $filter]}${content_filter:+ [Testo: $content_filter]}" "$CLR_TITLE"
+            line_text " fm  $REPLY${filter:+ [Name: $filter]}${content_filter:+ [Text: $content_filter]}" "$CLR_TITLE"
             column_header
             for ((i=0; i<visible; i++)); do
                 paint_entry "$((scroll+i))"
@@ -645,10 +645,10 @@ draw() {
         needs_full=0
     else
         if (( scroll != painted_scroll )); then
-            # Scorre solo l'elenco attivo, senza ricaricare l'altro pannello.
+            # Scroll only the active list, without reloading the other pane.
             for ((i=0; i<visible; i++)); do paint_entry "$((scroll+i))"; done
         else
-            # In navigazione aggiorna solo la vecchia e la nuova riga.
+            # During navigation, update only the old and new rows.
             (( painted_cursor != cursor )) && paint_entry "$painted_cursor"
             paint_entry "$cursor"
         fi
@@ -673,7 +673,7 @@ input_key() {
         char=$PENDING_CHAR; PENDING_CHAR=''
     else
         if ! IFS= read -rsn1 -u9 char; then
-            # WINCH puo' interrompere read anche quando ha gia' ricevuto un tasto.
+            # WINCH may interrupt read even after it has received a key.
             [[ -n $char ]] || return 1
         fi
     fi
@@ -687,8 +687,8 @@ input_key() {
                 return 0
             fi
             if [[ $next != '[' && $next != 'O' ]]; then
-                # Esc seguito rapidamente da una lettera: non perdere
-                # la lettera digitata subito dopo Esc.
+                # Esc quickly followed by a letter: keep
+                # the letter typed immediately after Esc.
                 PENDING_CHAR=$next
                 KEY='ESC'
                 return 0
@@ -750,7 +750,7 @@ input_key() {
     esac
 }
 
-# Inserimento in modalita' raw: niente dipendenze su read -e/readline o dialog.
+# Raw mode input: no dependencies on read -e/readline or dialog.
 ask() {
     local prompt=$1 value='' ch
     while :; do
@@ -760,11 +760,11 @@ ask() {
         case $ch in
             ''|$'\r'|$'\n') REPLY=$value; return 0;;
             $'\e')
-                # Scarta sequenze mouse durante i prompt.
+                # Discard mouse sequences during prompts.
                 local next tail k
                 if IFS= read -rsn1 -t 0.08 -u9 next; then
                     if [[ $next == '[' ]]; then
-                        IFS= read -rsn1 -t 0.08 -u9 tail || { notice='Operazione annullata.'; return 1; }
+                        IFS= read -rsn1 -t 0.08 -u9 tail || { notice='Operation cancelled.'; return 1; }
                         if [[ $tail == '<' ]]; then
                             for ((k=0; k<30; k++)); do
                                 IFS= read -rsn1 -t 0.08 -u9 tail || break
@@ -774,7 +774,7 @@ ask() {
                         fi
                     fi
                 fi
-                notice='Operazione annullata.'
+                notice='Operation cancelled.'
                 return 1
                 ;;
             $'\177'|$'\b') value=${value%?};;
@@ -790,15 +790,15 @@ ask() {
 select_current() {
     local path=${entries[cursor]}
     if [[ $path == '..' || $cwd == "$connections_root" ]]; then
-        notice="La directory padre non e' selezionabile."
+        notice="The parent directory cannot be selected."
         return
     fi
     if [[ -v marks["$path"] ]]; then
         unset 'marks[$path]'
-        notice='Elemento deselezionato.'
+        notice='Item unselected.'
     else
         marks["$path"]=1
-        notice='Elemento selezionato (*).'
+        notice='Item selected (*).'
     fi
     selection_sources[active_pane]=$cwd
 }
@@ -811,7 +811,7 @@ collect() {
         [[ $path == '..' ]] && continue
         [[ -v marks["$path"] ]] && targets+=("$path")
     done
-    # A pannello unico la selezione esplicita resta nella sua cartella di origine.
+    # In single-pane mode, explicit selections remain in their source directory.
     if [[ $scope == transfer ]] && (( !dual_pane )) &&
        [[ -n ${selection_sources[active_pane]} && ${selection_sources[active_pane]} != "$cwd" ]]; then
         for key in "${!directory_marks[@]}"; do
@@ -831,25 +831,25 @@ rename_item() {
     local path=${entries[cursor]} name file_error='' destination=$cwd
     [[ $cwd == "$connections_root" ]] && destination=$shortcuts_dir
     if [[ $path == '..' ]]; then
-        notice='Seleziona prima un elemento.'
+        notice='Select an item first.'
         return
     fi
     if ! rename_dialog "${path##*/}"; then return; fi
     name=$REPLY
     if [[ -z $name || $name == '.' || $name == '..' || $name == */* ]]; then
-        notice='Nome non valido.'
+        notice='Invalid name.'
         return
     fi
-    if [[ $name == "${path##*/}" ]]; then notice='Nome invariato.'; return; fi
+    if [[ $name == "${path##*/}" ]]; then notice='Name unchanged.'; return; fi
     if [[ -e $destination/$name || -L $destination/$name ]]; then
-        notice="Esiste gia' un elemento con quel nome."
+        notice="An item with that name already exists."
         return
     fi
     if file_command mv -T -- "$path" "$destination/$name"; then
         reload
-        notice="Rinominato: $name"
+        notice="Renamed: $name"
     else
-        notice="Rinomina non riuscita: $file_error"
+        notice="Rename failed: $file_error"
     fi
 }
 
@@ -859,39 +859,39 @@ transfer_items() {
     [[ $mode == copy ]] && transfer_command=(cp -aT)
     collect transfer
     if (( ${#targets[@]} == 0 )); then
-        notice='Seleziona prima un elemento.'
+        notice='Select an item first.'
         return
     fi
     if (( dual_pane )); then
         destination=${pane_dirs[1-active_pane]}
         if [[ $destination == "$connections_root" ]]; then
-            notice='Apri una cartella nel pannello di destinazione.'; return
+            notice='Open a directory in the destination pane.'; return
         fi
         if ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
-            notice='Directory del pannello opposto non accessibile.'
+            notice='Cannot access the other pane directory.'
             return
         fi
     else
-        local prompt='Directory di destinazione (Esc annulla): ' default=''
+        local prompt='Destination directory (Esc cancels): ' default=''
         if [[ ${targets[0]%/*} != "$cwd" ]]; then
-            prompt='Destinazione (Invio = cartella corrente, Esc annulla): '
+            prompt='Destination (Enter = current directory, Esc cancels): '
             default=$cwd
         fi
         if ! ask "$prompt"; then return; fi
         destination=${REPLY:-$default}
-        if [[ -z $destination ]]; then notice='Directory di destinazione non valida.'; return; fi
+        if [[ -z $destination ]]; then notice='Invalid destination directory.'; return; fi
         [[ $destination != /* ]] && destination="$cwd/$destination"
         if ! destination=$(cd -P -- "$destination" 2>/dev/null && pwd -P); then
-            notice='Directory di destinazione non valida.'
+            notice='Invalid destination directory.'
             return
         fi
     fi
     if is_archive_path "$destination"; then
-        notice='Archivio di destinazione in sola lettura.'; return
+        notice='Destination archive is read-only.'; return
     fi
     if [[ $mode == move ]]; then
         for src in "${targets[@]}"; do
-            if is_archive_path "$src"; then notice='Archivio in sola lettura: usa F5 per copiare i contenuti.'; return; fi
+            if is_archive_path "$src"; then notice='Read-only archive: use F5 to copy its contents.'; return; fi
         done
     fi
     if is_remote_path "${targets[0]}"; then
@@ -902,7 +902,7 @@ transfer_items() {
         destination_root=$REPLY
         [[ ${remote_protocols[$REPLY]} == ftp ]] && ftp_endpoint=1
     fi
-    # FTP non garantisce attributi Unix. Tra mount diversi, elimina solo dopo una copia riuscita.
+    # FTP does not guarantee Unix attributes. Across mounts, delete only after a successful copy.
     if (( ftp_endpoint )) && { [[ $mode == copy ]] || [[ $source_root != "$destination_root" ]]; }; then
         transfer_command=(cp -RT '--no-preserve=mode,ownership,timestamps')
         [[ $mode == move ]] && ftp_move=1
@@ -910,20 +910,20 @@ transfer_items() {
     for src in "${targets[@]}"; do
         dst="$destination/${src##*/}"
         if [[ $src == "$dst" ]]; then
-            reason=${reason:-"Stessa cartella di origine e destinazione."}
+            reason=${reason:-"Source and destination are the same directory."}
             ((failed+=1)); continue
         fi
         if [[ ! -e $src && ! -L $src ]]; then
-            reason=${reason:-"Origine non disponibile: ${src##*/}"}
+            reason=${reason:-"Source unavailable: ${src##*/}"}
             ((failed+=1)); continue
         fi
         if [[ -e $dst || -L $dst ]]; then
-            reason=${reason:-"Nome gia' presente nella destinazione: ${src##*/}"}
+            reason=${reason:-"Name already exists at destination: ${src##*/}"}
             ((failed+=1)); continue
         fi
-        # Non copiare o spostare una directory al proprio interno.
+        # Do not copy or move a directory inside itself.
         if [[ -d $src && ! -L $src && "$destination/" == "$src/"* ]]; then
-            reason=${reason:-"Destinazione interna alla cartella da trasferire."}
+            reason=${reason:-"Destination is inside the source directory."}
             ((failed+=1)); continue
         fi
         if file_command "${transfer_command[@]}" -- "$src" "$dst"; then
@@ -941,25 +941,25 @@ transfer_items() {
     marks=()
     cursor=1
     reload
-    notice="${reason:+$reason }Operazione completata: $okay. Non riusciti: $failed (nessuna sovrascrittura)."
+    notice="${reason:+$reason }Completed: $okay. Failed: $failed (no overwrites)."
 }
 
 new_dir() {
     local name file_error=''
-    if ! ask 'Nome nuova directory (Esc annulla): '; then return; fi
+    if ! ask 'New directory name (Esc cancels): '; then return; fi
     name=$REPLY
     if [[ -z $name || $name == '.' || $name == '..' || $name == */* ]]; then
-        notice='Nome non valido.'
+        notice='Invalid name.'
         return
     fi
     if [[ -e "$cwd/$name" || -L "$cwd/$name" ]]; then
-        notice="Esiste gia' un elemento con quel nome."
+        notice="An item with that name already exists."
         return
     fi
     if file_command mkdir -- "$cwd/$name"; then
-        notice="Directory creata: $name"
+        notice="Directory created: $name"
     else
-        notice="Creazione non riuscita: $file_error"
+        notice="Creation failed: $file_error"
     fi
     reload
 }
@@ -968,13 +968,13 @@ delete_items() {
     local path yes file_error='' reason='' count=0 errors=0
     collect
     if (( ${#targets[@]} == 0 )); then
-        notice='Seleziona prima un elemento.'
+        notice='Select an item first.'
         return
     fi
-    if ! ask "Eliminare ${#targets[@]} elemento/i? s/N: "; then return; fi
+    if ! ask "Delete ${#targets[@]} item(s)? y/N: "; then return; fi
     yes=$REPLY
-    if [[ $yes != 's' && $yes != 'S' && $yes != 'y' && $yes != 'Y' ]]; then
-        notice='Eliminazione annullata.'
+    if [[ $yes != 'y' && $yes != 'Y' ]]; then
+        notice='Deletion cancelled.'
         return
     fi
     for path in "${targets[@]}"; do
@@ -987,14 +987,14 @@ delete_items() {
     done
     cursor=1
     reload
-    notice="${reason:+$reason }Eliminati: $count. Errori: $errors."
+    notice="${reason:+$reason }Deleted: $count. Errors: $errors."
 }
 
-# Libera il terminale per eseguire un programma interattivo.
+# Release the terminal to run an interactive program.
 run_executable() {
     local path=${entries[cursor]}
     if [[ $path == '..' || ! -f $path || ! -x $path ]]; then
-        notice="Il file selezionato non e' un eseguibile."
+        notice="The selected file is not executable."
         return
     fi
     run_program 1 "$path"
@@ -1003,17 +1003,17 @@ run_executable() {
 open_document() {
     local path=$1 error_file error
     if ! command -v gio >/dev/null 2>&1; then
-        notice='Apertura MIME non disponibile: installa gio (libglib2.0-bin).'
+        notice='MIME opening unavailable: install gio (libglib2.0-bin).'
         return
     fi
     error_file=$(mktemp) || return
     if gio open "$path" </dev/null >/dev/null 2>"$error_file"; then
         safe "${path##*/}"
-        notice="Apertura richiesta: $REPLY"
+        notice="Open requested: $REPLY"
     else
         error=$(<"$error_file")
         safe "$error"
-        notice="Apertura non riuscita: $REPLY"
+        notice="Open failed: $REPLY"
     fi
     rm -f -- "$error_file"
 }
@@ -1022,19 +1022,19 @@ edit_item() {
     local path=${entries[cursor]}
     local -a editor
     if [[ $path == '..' || ! -f $path ]]; then
-        notice='Seleziona un file da editare.'
+        notice='Select a file to edit.'
         return
     fi
     read -r -a editor <<< "${EDITOR:-nano}"
     if (( ${#editor[@]} == 0 )) || ! command -v "${editor[0]}" >/dev/null 2>&1; then
-        notice='Editor non disponibile: imposta EDITOR oppure installa nano.'
+        notice='Editor unavailable: set EDITOR or install nano.'
         return
     fi
     run_program 0 "${editor[@]}" "$path"
     reload
 }
 
-# Passa il terminale al comando e lo ripristina al termine.
+# Pass the terminal to the command and restore it afterward.
 run_program() {
     local wait_for_enter=$1 status run_cwd=$cwd
     shift
@@ -1043,12 +1043,12 @@ run_program() {
     (( alt_screen )) && printf '\033[?1049l' >&9
     stty "$original_tty" <&9 || return
     printf '\r\nfm: esecuzione di %s\r\n' "$program_name" >&9
-    # Invocazione diretta senza eval e senza interpolare il nome.
+    # Invoke directly without eval or interpolating the name.
     [[ $run_cwd == "$connections_root" ]] && run_cwd=/
     (cd -- "$run_cwd" && "$@") <&9 >&9 2>&9
     status=$?
     if (( wait_for_enter )); then
-        printf '\r\n[Uscita: %d] Premi Invio per tornare al file manager...' "$status" >&9
+        printf '\r\n[Exit: %d] Press Enter to return to the file manager...' "$status" >&9
         IFS= read -r -u9 _unused || :
     fi
     stty -echo -icanon -icrnl -ixon min 1 time 0 <&9 || return
@@ -1056,11 +1056,11 @@ run_program() {
     printf '\033[?25l\033[?1000h\033[?1006h' >&9
     needs_full=1
     search_counts=()
-    notice="Eseguito: $program_name (codice $status)."
+    notice="Executed: $program_name (exit code $status)."
     return "$status"
 }
 
-# sudo gestisce la password sul terminale: fm non la legge né la conserva.
+# sudo handles the password in the terminal: fm never reads or stores it.
 file_command() {
     local error status
     file_error=''
@@ -1069,14 +1069,14 @@ file_command() {
     if [[ $error == *'Operation not permitted'* || $error == *'Permission denied'* ]]; then
         local argument
         for argument in "$@"; do
-            if is_archive_path "$argument"; then file_error='Archivio in sola lettura.'; return 1; fi
+            if is_archive_path "$argument"; then file_error='Read-only archive.'; return 1; fi
             if is_remote_path "$argument"; then file_error='Permessi negati sul server remoto.'; return 1; fi
         done
         trap ':' INT
         run_program 0 sudo -- "$@"
         status=$?
         trap 'exit 130' INT
-        (( status != 0 )) && file_error='Operazione sudo annullata o non riuscita.'
+        (( status != 0 )) && file_error='Sudo operation cancelled or failed.'
         return "$status"
     fi
     safe "$error"
@@ -1084,7 +1084,7 @@ file_command() {
     return 1
 }
 
-# Finestre modali con la palette del tema MC modarin256-thin.
+# Modal windows using the MC modarin256-thin theme palette.
 modal_frame() {
     local title=$1 i d
     if (( resized )); then resized=0; needs_full=1; draw; fi
@@ -1140,15 +1140,15 @@ modal_box() {
 }
 
 modal_buttons() {
-    local focus=$1 label=${2:-Imposta} line=$modal_buttons_row x=$modal_buttons_x
+    local focus=$1 label=${2:-Apply} line=$modal_buttons_row x=$modal_buttons_x
     modal_text "$line" "$x" 13 "[ $label ]" "$CLR_DIALOG"
-    modal_text "$line" "$((x+14))" 11 '[ Annulla ]' "$CLR_DIALOG"
+    modal_text "$line" "$((x+14))" 11 '[ Cancel ]' "$CLR_DIALOG"
     (( focus == 0 )) && modal_text "$line" "$x" 13 "[<$label>]" "$CLR_DIALOG_FOCUS"
-    (( focus == 1 )) && modal_text "$line" "$((x+14))" 11 '[<Annulla>]' "$CLR_DIALOG_FOCUS"
+    (( focus == 1 )) && modal_text "$line" "$((x+14))" 11 '[<Cancel>]' "$CLR_DIALOG_FOCUS"
     return 0
 }
 
-# Disegno e hitbox usano le stesse coordinate calcolate da modal_frame.
+# Drawing and hitboxes share the coordinates calculated by modal_frame.
 modal_button_at() {
     local x=$((MOUSE_X-modal_x-modal_buttons_x))
     REPLY=''
@@ -1168,7 +1168,7 @@ show_help() {
     local -a help_lines=()
     needs_full=1
     while :; do
-        modal_frame 'Istruzioni' 90 26
+        modal_frame 'Help' 90 26
         mapfile -t help_lines < <(usage | fold -s -w "$((modal_w-4))")
         capacity=$((modal_h-5))
         limit=$((${#help_lines[@]}-capacity))
@@ -1179,9 +1179,9 @@ show_help() {
             modal_line "$((i+1))" "${help_lines[i+offset]}"
         done
         modal_rule "$((modal_h-4))"
-        modal_line "$((modal_h-3))" 'Frecce/Pg/Home/End: scorri'
+        modal_line "$((modal_h-3))" 'Arrows/Pg/Home/End: scroll'
         button_x=$(((modal_w-10)/2))
-        modal_text "$((modal_h-2))" "$button_x" 10 '[ Chiudi ]' "$CLR_DIALOG_FOCUS"
+        modal_text "$((modal_h-2))" "$button_x" 10 '[ Close ]' "$CLR_DIALOG_FOCUS"
         if ! input_key; then needs_full=1; return; fi
         case $KEY in
             UP) ((offset-=1));; DOWN) ((offset+=1));;
@@ -1200,7 +1200,7 @@ show_help() {
     done
 }
 
-# Menu personale MC: condizioni valutate senza eseguire codice shell.
+# Personal MC menu: evaluate conditions without executing shell code.
 menu_condition() {
     local expression=$1 kind arg term negate op='|' result=0 path flag i=0
     local -a words=()
@@ -1298,7 +1298,7 @@ expand_user_command() {
                 values=("$REPLY"); ((i+=${#prompt}+1))
                 ;;
             v)
-                if [[ ${body:i:4} != view ]]; then notice='Macro MC non supportata: %v'; return 1; fi
+                if [[ ${body:i:4} != view ]]; then notice='Unsupported MC macro: %v'; return 1; fi
                 menu_view=1; ((i+=3))
                 if [[ ${body:i+1:1} == '{' ]]; then rest=${body:i+2}; rest=${rest%%\}*}; ((i+=${#rest}+2)); fi
                 continue
@@ -1309,7 +1309,7 @@ expand_user_command() {
             S) values=("${other_tagged[@]}"); (( ${#values[@]} )) || values=("$other_name");;
             t|u) values=("${menu_tagged[@]}"); [[ $char == u ]] && menu_unmark=1;;
             T|U) values=("${other_tagged[@]}"); [[ $char == U ]] && menu_other_unmark=1;;
-            *) notice="Macro MC non supportata: %$char"; return 1;;
+            *) notice="Unsupported MC macro: %$char"; return 1;;
         esac
         value=''
         for path in "${values[@]}"; do
@@ -1323,7 +1323,7 @@ expand_user_command() {
 user_menu() {
     local menu_source=${XDG_CONFIG_HOME:-$HOME/.config}/mc/menu
     [[ -r $menu_source ]] || menu_source=/etc/mc/mc.menu
-    if [[ ! -r $menu_source ]]; then notice='Menu MC non trovato.'; return; fi
+    if [[ ! -r $menu_source ]]; then notice='MC menu not found.'; return; fi
     local menu_file=${entries[cursor]} menu_name=${entries[cursor]##*/} path key i choice=0 offset=0 capacity focus=0
     local other_file=$menu_file other_name=$menu_name other_dir=$cwd menu_shell_patterns=1 menu_default=-1
     local menu_script menu_view menu_unmark menu_other_unmark clicked=-1 click_time=0 now
@@ -1334,11 +1334,11 @@ user_menu() {
     done
     if (( dual_pane )); then menu_other_panel; else other_file=$menu_file; fi
     load_user_menu
-    if (( !${#menu_keys[@]} )); then notice='Nessun comando MC disponibile per la selezione.'; return; fi
+    if (( !${#menu_keys[@]} )); then notice='No MC commands available for the selection.'; return; fi
     (( menu_default >= 0 )) && choice=$menu_default
     needs_full=1
     while :; do
-        modal_frame 'Menu comandi (MC)' 78 24
+        modal_frame 'Commands menu (MC)' 78 24
         capacity=$((modal_h-6))
         (( choice < offset )) && offset=$choice
         (( choice >= offset+capacity )) && offset=$((choice-capacity+1))
@@ -1349,8 +1349,8 @@ user_menu() {
             modal_line "$((i+2))" " ${menu_keys[i+offset]}  ${menu_labels[i+offset]}" "$style"
         done
         modal_rule "$((modal_h-4))"
-        modal_buttons "$((focus-1))" 'Esegui'
-        modal_line "$((modal_h-2))" 'Frecce/Pg: scegli  Invio: esegui  Esc: annulla'
+        modal_buttons "$((focus-1))" 'Run'
+        modal_line "$((modal_h-2))" 'Arrows/Pg: select  Enter: run  Esc: cancel'
         if ! input_key; then needs_full=1; return; fi
         key=$KEY
         case $key in
@@ -1360,7 +1360,7 @@ user_menu() {
             PAGEUP) focus=0; ((choice-=capacity)); ((choice<0)) && choice=0;;
             PAGEDOWN) focus=0; ((choice+=capacity)); ((choice>=${#menu_keys[@]})) && choice=$((${#menu_keys[@]}-1));;
             TAB) focus=$(((focus+1)%3));;
-            ESC|F10) modal_cancel 'Menu comandi annullato.'; return;;
+            ESC|F10) modal_cancel 'Commands menu cancelled.'; return;;
             ENTER) if (( focus == 2 )); then needs_full=1; return; fi; break;;
             MOUSE)
                 local x=$((MOUSE_X-modal_x)) y=$((MOUSE_Y-modal_y))
@@ -1406,36 +1406,36 @@ user_menu() {
 rename_dialog() {
     local original=$1 name=$1 pos=0 selected=1 focus=0 offset=0 width key x y style
     while :; do
-        modal_frame 'Rinomina' 66 12
+        modal_frame 'Rename' 66 12
         width=$((modal_w-8))
         (( pos < offset )) && offset=$pos
         (( pos >= offset+width )) && offset=$((pos-width+1))
-        modal_line 1 'Nome attuale:' "$CLR_DIALOG_TITLE"
+        modal_line 1 'Current name:' "$CLR_DIALOG_TITLE"
         modal_line 2 "$original"
-        modal_line 4 'Nuovo nome:' "$CLR_DIALOG_TITLE"
+        modal_line 4 'New name:' "$CLR_DIALOG_TITLE"
         style=$CLR_DIALOG
         (( focus == 0 )) && style=$CLR_CURSOR
         modal_text 5 4 "$width" "${name:offset:width}" "$style"
         if (( selected && focus == 0 )); then
             modal_text 5 4 "$(( ${#name}<width ? ${#name} : width ))" "${name:0:width}" "$CLR_DIALOG_FOCUS"
         fi
-        modal_line 7 'Invio: rinomina  Tab: pulsanti  Esc: annulla'
+        modal_line 7 'Enter: rename  Tab: buttons  Esc: cancel'
         modal_rule 8
-        modal_buttons "$((focus-1))" 'Rinomina'
+        modal_buttons "$((focus-1))" 'Rename'
         if (( focus == 0 )); then
             printf '\033[%d;%dH\033[?25h' "$((modal_y+5))" "$((modal_x+4+pos-offset))" >&9
         fi
         if ! input_key; then
             printf '\033[?25l' >&9
-            modal_cancel 'Rinomina annullata.'; return 1
+            modal_cancel 'Rename cancelled.'; return 1
         fi
         printf '\033[?25l' >&9
         key=$KEY
         case $key in
             TAB) focus=$(((focus+1)%3));;
-            ESC|F10) modal_cancel 'Rinomina annullata.'; return 1;;
+            ESC|F10) modal_cancel 'Rename cancelled.'; return 1;;
             ENTER)
-                if (( focus == 2 )); then modal_cancel 'Rinomina annullata.'; return 1; fi
+                if (( focus == 2 )); then modal_cancel 'Rename cancelled.'; return 1; fi
                 REPLY=$name; needs_full=1; return 0
                 ;;
             LEFT)
@@ -1473,7 +1473,7 @@ rename_dialog() {
                         if [[ $REPLY == apply ]]; then
                             focus=1; PENDING_CHAR=$'\r'
                         else
-                            modal_cancel 'Rinomina annullata.'; return 1
+                            modal_cancel 'Rename cancelled.'; return 1
                         fi
                     fi
                 fi
@@ -1493,16 +1493,16 @@ rename_dialog() {
 attributes_dialog() {
     local row col i mask check label cell_x style column idx count start name
     local list_top=9 bottom list_x
-    modal_frame 'Permessi e proprietario' 78 24
+    modal_frame 'Permissions and owner' 78 24
     bottom=$((modal_h-6))
-    # Sui terminali bassi Tab alterna la griglia e le liste nella stessa finestra.
+    # On short terminals, Tab alternates the grid and lists in the same window.
     if (( modal_h < 20 )); then list_top=3; fi
-    modal_line 1 "File: ${targets[0]##*/} (${#targets[@]} selezionati)"
-    modal_line 2 "Modo: ${digits:-$new_mode}  ${owner:-${current%:*}}:${group:-${current#*:}}" "$CLR_DIALOG_TITLE"
+    modal_line 1 "File: ${targets[0]##*/} (${#targets[@]} selected)"
+    modal_line 2 "Mode: ${digits:-$new_mode}  ${owner:-${current%:*}}:${group:-${current#*:}}" "$CLR_DIALOG_TITLE"
     if (( modal_h >= 20 || focus == 0 || focus >= 3 )); then
-        modal_line 3 '           Lett.  Scritt. Esec.'
+        modal_line 3 '           Read   Write  Exec'
         for ((row=0; row<3; row++)); do
-            case $row in 0) label='Utente';; 1) label='Gruppo';; 2) label='Altri';; esac
+            case $row in 0) label='User';; 1) label='Group';; 2) label='Others';; esac
             modal_line "$((4+row))" "$label"
             for ((col=0; col<3; col++)); do
                 i=$((row*3+col)); mask=$((1 << (8-i)))
@@ -1512,7 +1512,7 @@ attributes_dialog() {
                 modal_text "$((4+row))" "$cell_x" 3 "[$check]" "$style"
             done
         done
-        modal_line 7 "Ottale: ${digits:-$new_mode} (digita 755 o 0644)" "$CLR_DIALOG_TITLE"
+        modal_line 7 "Octal: ${digits:-$new_mode} (type 755 or 0644)" "$CLR_DIALOG_TITLE"
     fi
     list_count=$((bottom-list_top-1)); list_w=$(((modal_w-6)/2))
     list_y=$((list_top+1))
@@ -1520,10 +1520,10 @@ attributes_dialog() {
         for ((column=0; column<2; column++)); do
             list_x=$((2+column*(list_w+1)))
             if (( column == 0 )); then
-                modal_box "$list_x" "$list_w" 'Utenti' "$bottom" "$list_top"
+                modal_box "$list_x" "$list_w" 'Users' "$bottom" "$list_top"
                 idx=$user_index; count=${#user_names[@]}
             else
-                modal_box "$list_x" "$list_w" 'Gruppi' "$bottom" "$list_top"
+                modal_box "$list_x" "$list_w" 'Groups' "$bottom" "$list_top"
                 idx=$group_index; count=${#group_names[@]}
             fi
             start=$((idx-list_count/2))
@@ -1540,8 +1540,8 @@ attributes_dialog() {
             (( start+list_count < count )) && modal_text "$((bottom-1))" "$((list_x+list_w-1))" 1 'v'
         done
     fi
-    modal_line "$((modal_h-5))" 'Tab: permessi / utente / gruppo / pulsanti'
-    # Lascia spazio alla griglia nei terminali di sole 12 righe.
+    modal_line "$((modal_h-5))" 'Tab: permissions / user / group / buttons'
+    # Leave space for the grid on terminals with only 12 rows.
     (( modal_h >= 14 || focus == 1 || focus == 2 )) && modal_rule "$((modal_h-4))"
     modal_buttons "$((focus-3))"
 }
@@ -1553,7 +1553,7 @@ attributes_items() {
     local user_index=0 group_index=0 user_start=0 group_start=0 list_count list_w list_y
     local -a user_names=() group_names=()
     collect
-    if (( ${#targets[@]} == 0 )); then notice='Nessun elemento selezionato.'; return; fi
+    if (( ${#targets[@]} == 0 )); then notice='No items selected.'; return; fi
     base_mode=$(stat -c %a -- "${targets[0]}" 2>/dev/null) || return
     current=$(stat -c '%U:%G' -- "${targets[0]}" 2>/dev/null) || return
     perms=$((8#$base_mode))
@@ -1567,7 +1567,7 @@ attributes_items() {
     while :; do
         printf -v new_mode '%04o' "$perms"
         attributes_dialog
-        if ! input_key; then modal_cancel 'Modifica attributi annullata.'; return; fi
+        if ! input_key; then modal_cancel 'Attribute changes cancelled.'; return; fi
         key=$KEY
         case $key in
             TAB) focus=$(((focus+1)%5));;
@@ -1608,16 +1608,16 @@ attributes_items() {
                 ;;
             ':') focus=2;;
             ENTER)
-                if (( focus == 4 )); then modal_cancel 'Modifica attributi annullata.'; return; fi
+                if (( focus == 4 )); then modal_cancel 'Attribute changes cancelled.'; return; fi
                 if [[ -n $digits && ! $digits =~ ^[0-7]{3,4}$ ]]; then
-                    notice='Modo ottale non valido: usa 3 o 4 cifre da 0 a 7.'; needs_full=1; return
+                    notice='Invalid octal mode: use 3 or 4 digits from 0 to 7.'; needs_full=1; return
                 fi
                 if (( chmod_dirty )) || [[ -n $digits ]]; then mode=${digits:-$new_mode}; fi
                 spec=$owner; [[ -n $group ]] && spec="$owner:$group"
                 break
                 ;;
             ESC|F10)
-                modal_cancel 'Modifica attributi annullata.'; return
+                modal_cancel 'Attribute changes cancelled.'; return
                 ;;
             MOUSE)
                 if [[ $MOUSE_ACTION == M && $MOUSE_BTN == 0 ]]; then
@@ -1637,7 +1637,7 @@ attributes_items() {
                         if [[ $REPLY == apply ]]; then
                             focus=3; PENDING_CHAR=$'\r'
                         else
-                            modal_cancel 'Modifica attributi annullata.'; return
+                            modal_cancel 'Attribute changes cancelled.'; return
                         fi
                     fi
                 fi
@@ -1654,7 +1654,7 @@ attributes_items() {
         esac
     done
     needs_full=1
-    # chown puo' azzerare setuid/setgid: applica chmod dopo il proprietario.
+    # chown may clear setuid/setgid: apply chmod after ownership.
     for path in "${targets[@]}"; do
         if [[ -n $spec ]]; then
             if file_command chown -- "$spec" "$path"; then ((chown_changed+=1)); else ((failed+=1)); fi
@@ -1665,17 +1665,17 @@ attributes_items() {
             else ((failed+=1)); fi
         fi
     done
-    [[ -n $spec ]] && summary="chown $spec: modificati $chown_changed. "
-    [[ -n $mode ]] && summary+="chmod $mode: modificati $chmod_changed. "
+    [[ -n $spec ]] && summary="chown $spec: changed $chown_changed. "
+    [[ -n $mode ]] && summary+="chmod $mode: changed $chmod_changed. "
     reload
-    notice="${file_error:+$file_error }${summary:-Nessuna modifica. }Non riusciti: $failed."
+    notice="${file_error:+$file_error }${summary:-No changes. }Failed: $failed."
 }
 
 create_symlink() {
     if [[ $cwd == "$connections_root" ]]; then
-        if (( !dual_pane )); then notice='Apri due pannelli per aggiungere un segnalibro.'; return; fi
+        if (( !dual_pane )); then notice='Open two panes to add a bookmark.'; return; fi
         if [[ ${pane_dirs[1-active_pane]} == "$connections_root" ]]; then
-            notice='Seleziona una cartella nel pannello opposto alla super-root.'; return
+            notice='Select a directory in the pane opposite the connections root.'; return
         fi
     fi
     if (( dual_pane )) && [[ $cwd == "$connections_root" || ${pane_dirs[1-active_pane]} == "$connections_root" ]]; then
@@ -1684,26 +1684,26 @@ create_symlink() {
     fi
     local path=${entries[cursor]} name file_error=''
     if [[ $path == '..' ]]; then
-        notice='Seleziona un file o una directory per il link.'
+        notice='Select a file or directory for the link.'
         return
     fi
     name="${path##*/}.lnk"
     if [[ -e $cwd/$name || -L $cwd/$name ]]; then
-        notice="Esiste gia' un file o link con questo nome."
+        notice="A file or link with this name already exists."
         return
     fi
-    # Destinazione assoluta: il link resta valido dopo aver spostato
-    # il collegamento in un altra directory (finche il target esiste).
+    # Absolute target: the link remains valid after moving
+    # the link to another directory (as long as the target exists).
     if file_command ln -s -- "$path" "$cwd/$name"; then
         reload
-        notice="Creato link $name -> $path"
+        notice="Created link $name -> $path"
     else
-        notice="Creazione link non riuscita: $file_error"
+        notice="Link creation failed: $file_error"
     fi
 }
 
-# Le connessioni GVfs espongono un percorso FUSE alle normali operazioni di fm.
-# REPLY riceve la radice del mount per distinguere protocollo e trasferimenti interni.
+# GVfs connections expose a FUSE path to normal fm operations.
+# REPLY receives the mount root to distinguish protocols and transfers within a mount.
 is_archive_path() {
     local root
     for root in "${!archive_sources[@]}"; do
@@ -1726,18 +1726,18 @@ open_archive() {
             change_directory "$root"; return
         fi
     done
-    # Il backend archive non puo' leggere direttamente i percorsi di altri mount GVfs.
+    # The archive backend cannot directly read paths on other GVfs mounts.
     if is_archive_path "$path" || is_remote_path "$path"; then
         cache=$(mktemp -d "${TMPDIR:-/tmp}/fm-archive.XXXXXX") || return
         archive_pending_cache=$cache
         mount_path="$cache/${path##*/}"
         if ! file_command cp -- "$path" "$mount_path"; then
             rm -rf -- "$cache"
-            notice="Impossibile leggere il file archivio: $file_error"; return
+            notice="Cannot read archive file: $file_error"; return
         fi
     fi
     result=$(mktemp) || { [[ -n $cache ]] && rm -rf -- "$cache"; return; }
-    local run_program_label="Apertura archivio ${path##*/}"
+    local run_program_label="Opening archive ${path##*/}"
     trap ':' INT
     run_program 0 remote_mount archive "$mount_path" -1 "$result"
     status=$?
@@ -1746,8 +1746,8 @@ open_archive() {
     rm -f -- "$result"
     if (( status != 0 )); then
         [[ -n $cache ]] && rm -rf -- "$cache"
-        safe "${root:-annullata}"; message=$REPLY
-        notice="Apertura archivio non riuscita: $message"; return
+        safe "${root:-cancelled}"; message=$REPLY
+        notice="Cannot open archive: $message"; return
     fi
     archive_sources["$root"]=$path
     [[ -n $cache ]] && archive_cache["$root"]=$cache
@@ -1766,7 +1766,7 @@ is_remote_path() {
 display_path() {
     local root
     REPLY=$1
-    if [[ $1 == "$connections_root" ]]; then REPLY='Connessioni'; return; fi
+    if [[ $1 == "$connections_root" ]]; then REPLY='Connections'; return; fi
     for root in "${!archive_sources[@]}"; do
         if [[ $1 == "$root" || $1 == "$root/"* ]]; then
             local suffix=${1#"$root"} source=${archive_sources[$root]}
@@ -1788,8 +1788,8 @@ connection_dialog() {
     local protocol=$1 focus=0 replace_address=1 key value style width
     remote_password=''
     while :; do
-        modal_frame "Connessione ${protocol^^}" 70 14
-        modal_line 1 'Indirizzo (utente@host oppure utente@host:porta):' "$CLR_DIALOG_TITLE"
+        modal_frame "${protocol^^} connection" 70 14
+        modal_line 1 'Address (user@host or user@host:port):' "$CLR_DIALOG_TITLE"
         width=$((modal_w-8))
         style=$CLR_DIALOG; (( focus == 0 )) && style=$CLR_CURSOR
         value=$remote_address
@@ -1801,25 +1801,25 @@ connection_dialog() {
         (( ${#value}>width )) && value=${value: -width}
         modal_text 5 4 "$width" "$value" "$style"
         if [[ $protocol == ssh ]]; then
-            modal_line 7 'Vuota: portachiavi o chiavi SSH.'
+            modal_line 7 'Empty: use keyring or SSH keys.'
         else
-            modal_line 7 'Vuota: usa la password salvata nel portachiavi.'
+            modal_line 7 'Empty: use the password saved in the keyring.'
         fi
-        (( modal_h >= 14 )) && modal_line 8 'Password ricordata nel portachiavi di sistema.'
-        (( modal_h >= 14 )) && modal_line 9 'Tab: cambia campo  Invio: connetti  Esc: annulla'
+        (( modal_h >= 14 )) && modal_line 8 'Password saved in the system keyring.'
+        (( modal_h >= 14 )) && modal_line 9 'Tab: switch field  Enter: connect  Esc: cancel'
         modal_rule "$((modal_h-4))"
-        modal_buttons "$((focus-2))" 'Connetti'
-        if ! input_key; then modal_cancel 'Connessione annullata.'; return 1; fi
+        modal_buttons "$((focus-2))" 'Connect'
+        if ! input_key; then modal_cancel 'Connection cancelled.'; return 1; fi
         key=$KEY
         case $key in
             TAB) focus=$(((focus+1)%4));;
             UP|DOWN) focus=$((1-(focus%2)));;
-            ESC|F10) modal_cancel 'Connessione annullata.'; return 1;;
+            ESC|F10) modal_cancel 'Connection cancelled.'; return 1;;
             ENTER)
-                if (( focus == 3 )); then modal_cancel 'Connessione annullata.'; return 1; fi
+                if (( focus == 3 )); then modal_cancel 'Connection cancelled.'; return 1; fi
                 if (( focus == 0 )); then focus=1; continue; fi
                 if [[ ! $remote_address =~ ^[^:@/[:space:]]+@[^/@[:space:]]+$ ]]; then
-                    modal_cancel 'Indirizzo non valido: usa utente@host[:porta].'; return 1
+                    modal_cancel 'Invalid address: use user@host[:port].'; return 1
                 fi
                 needs_full=1; return 0
                 ;;
@@ -1841,7 +1841,7 @@ connection_dialog() {
                     elif (( x>=4 && x<modal_w-4 && y==5 )); then focus=1
                     elif modal_button_at; then
                         if [[ $REPLY == apply ]]; then focus=2; PENDING_CHAR=$'\r'
-                        else modal_cancel 'Connessione annullata.'; return 1; fi
+                        else modal_cancel 'Connection cancelled.'; return 1; fi
                     fi
                 fi
                 ;;
@@ -1876,7 +1876,7 @@ def fail(message):
 try:
     from gi.repository import Gio, GLib
 except ImportError:
-    fail("Supporto GVfs assente: servono python3-gi, gvfs-backends e gvfs-fuse.")
+    fail("GVfs support unavailable: python3-gi, gvfs-backends and gvfs-fuse are required.")
     sys.exit(1)
 
 try:
@@ -1895,7 +1895,7 @@ try:
             raise ValueError()
         location = Gio.File.new_for_uri(parsed.geturl())
 except (ValueError, GLib.Error):
-    fail("Indirizzo non valido: usa utente@host[:porta].")
+    fail("Invalid address: use user@host[:port].")
     sys.exit(1)
 
 operation = Gio.MountOperation()
@@ -1909,11 +1909,11 @@ auth_error = ""
 def ask_password(op, message, default_user, default_domain, flags):
     global attempted, auth_error
     if protocol == "archive":
-        auth_error = "Archivio protetto o non leggibile."
+        auth_error = "Archive is protected or unreadable."
         op.reply(Gio.MountOperationResult.ABORTED)
         return
     if attempted or (protocol == "ssh" and not password):
-        auth_error = "Autenticazione non riuscita." if attempted else "Chiave SSH non disponibile: inserisci la password."
+        auth_error = "Authentication failed." if attempted else "SSH key unavailable: enter the password."
         op.reply(Gio.MountOperationResult.ABORTED)
         return
     attempted = True
@@ -1928,7 +1928,7 @@ def ask_question(op, message, choices):
     print(message)
     for index, choice in enumerate(choices, 1):
         print(f"{index}. {choice}")
-    print("Scelta (vuoto annulla): ", end="", flush=True)
+    print("Choice (empty cancels): ", end="", flush=True)
     try:
         with open("/dev/tty") as tty:
             answer = int(tty.readline().strip()) - 1
@@ -1948,16 +1948,16 @@ def mounted(file, result):
             if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.ALREADY_MOUNTED):
                 raise
         if protocol == "archive":
-            # Il backend archive pubblica la radice con l'URI interno nuovamente quotato.
+            # The archive backend publishes its root with the inner URI quoted again.
             file = Gio.File.new_for_uri("archive://" + quote(quote(uri, safe=""), safe="") + "/")
-        # L'autenticazione dal portachiavi puo' finire prima dell'esportazione FUSE.
+        # Keyring authentication may finish before the FUSE export is ready.
         for _ in range(40):
             root = file.find_enclosing_mount(None).get_root().get_path()
             if root and os.path.isdir(root):
                 break
             time.sleep(0.05)
         if not root or not os.path.isdir(root):
-            raise RuntimeError("Percorso remoto non disponibile: verifica gvfs-fuse.")
+            raise RuntimeError("Remote path unavailable: check gvfs-fuse.")
         pathlib.Path(result_file).write_text(root + "\n")
         status = 0
     except (GLib.Error, RuntimeError, OSError) as error:
@@ -1966,7 +1966,7 @@ def mounted(file, result):
 
 def timed_out():
     cancellable.cancel()
-    fail("Tempo di connessione scaduto.")
+    fail("Connection timed out.")
     loop.quit()
     return False
 
@@ -1977,7 +1977,7 @@ location.mount_enclosing_volume(Gio.MountMountFlags.NONE, operation, cancellable
 try:
     loop.run()
 except KeyboardInterrupt:
-    fail("Connessione annullata.")
+    fail("Connection cancelled.")
 sys.exit(status)
 PY
 }
@@ -1994,14 +1994,14 @@ add_shortcut() {
         )
     else path=${entries[cursor]}; fi
     if [[ $path == '..' || ! -d $path ]]; then
-        notice='Seleziona una cartella nel pannello opposto alla super-root.'; return
+        notice='Select a directory in the pane opposite the connections root.'; return
     fi
     name="${path##*/}.lnk"
     if ! path=$(cd -P -- "$path" 2>/dev/null && pwd -P); then
-        notice='Cartella non disponibile.'; return
+        notice='Directory unavailable.'; return
     fi
     if is_archive_path "$path"; then
-        notice='Per i segnalibri scegli una cartella fuori dagli archivi.'; return
+        notice='Choose a directory outside archives for bookmarks.'; return
     fi
     destination=$path
     if is_remote_path "$path"; then
@@ -2019,13 +2019,13 @@ PYURI
         ) || return
     fi
     if [[ -e $shortcuts_dir/$name || -L $shortcuts_dir/$name ]]; then
-        notice="Esiste gia' un elemento con quel nome."; return
+        notice="An item with that name already exists."; return
     fi
     if error=$({ mkdir -p -- "$shortcuts_dir" && ln -s -- "$destination" "$shortcuts_dir/$name"; } 2>&1); then
         reload
-        notice="Segnalibro aggiunto: $name"
+        notice="Bookmark added: $name"
     else
-        safe "$error"; notice="Creazione non riuscita: $REPLY"
+        safe "$error"; notice="Creation failed: $REPLY"
     fi
 }
 
@@ -2051,7 +2051,7 @@ except ValueError:
     pass
 PYURI
         )
-        if (( ${#location[@]} != 3 )); then notice='Segnalibro remoto non valido.'; return; fi
+        if (( ${#location[@]} != 3 )); then notice='Invalid remote bookmark.'; return; fi
         for root in "${!remote_labels[@]}"; do
             if [[ ${remote_protocols[$root]} == "${location[0]}" && ${remote_addresses[$root]} == "${location[1]}" && -d $root ]]; then
                 change_directory "$root/${location[2]#/}"
@@ -2060,10 +2060,10 @@ PYURI
         done
         connect_remote "${location[0]}" "${location[1]}" "${location[2]}"
     elif [[ -d $1 ]]; then change_directory "$1"
-    else notice='Scorciatoia non disponibile: verifica la cartella di destinazione.'; fi
+    else notice='Shortcut unavailable: check the destination directory.'; fi
 }
 
-# Tre righe per voce: protocollo, indirizzo, nome. Il nome non e' mai un percorso.
+# Three lines per entry: protocol, address, name. The name is never a path.
 save_connection() {
     local protocol=$1 address=$2 name=${3:-} id file saved old_protocol='' old_address=''
     id=$(printf '%s\0%s' "$protocol" "$address" | sha256sum); id=${id%% *}
@@ -2084,7 +2084,7 @@ save_connection() {
 load_saved_connections() {
     local file id protocol address name
     connection_names=(); connection_protocols=(); connection_addresses=()
-    # Importa una volta gli ultimi indirizzi della versione precedente.
+    # Import the last addresses from the previous version once.
     if [[ ! -d $connections_dir ]]; then
         for protocol in ssh ftp; do
             file="${connections_dir%/*}/last-$protocol"
@@ -2111,37 +2111,37 @@ rename_saved_connection() {
     local entry=${entries[cursor]} id name protocol address
     id=${entry#profile:}
     if [[ $entry != profile:* || ! -v connection_names["$id"] ]]; then
-        notice='Seleziona una connessione salvata.'; return
+        notice='Select a saved connection.'; return
     fi
     protocol=${connection_protocols[$id]}; address=${connection_addresses[$id]}
     if ! rename_dialog "${connection_names[$id]}"; then return; fi
     name=$REPLY
-    if [[ -z $name ]]; then notice='Nome non valido.'; return; fi
+    if [[ -z $name ]]; then notice='Invalid name.'; return; fi
     if save_connection "$protocol" "$address" "$name"; then
         reload
-        notice="Connessione rinominata: $name"
-    else notice='Impossibile salvare il nome della connessione.'; fi
+        notice="Connection renamed: $name"
+    else notice='Cannot save the connection name.'; fi
 }
 
 delete_saved_connection() {
     local entry=${entries[cursor]} id
     if [[ $entry == "$shortcuts_dir/"* && -L $entry ]]; then
-        if ! ask 'Eliminare solo la scorciatoia? s/N: '; then return; fi
-        if [[ $REPLY != [sSyY] ]]; then notice='Eliminazione annullata.'; return; fi
-        if rm -- "$entry" 2>/dev/null; then reload; notice='Scorciatoia eliminata.'
-        else notice='Impossibile eliminare la scorciatoia.'; fi
+        if ! ask 'Delete only the shortcut? y/N: '; then return; fi
+        if [[ $REPLY != [yY] ]]; then notice='Deletion cancelled.'; return; fi
+        if rm -- "$entry" 2>/dev/null; then reload; notice='Shortcut deleted.'
+        else notice='Cannot delete the shortcut.'; fi
         return
     fi
     id=${entry#profile:}
     if [[ $entry != profile:* || ! -v connection_names["$id"] ]]; then
-        notice='Seleziona una connessione salvata.'; return
+        notice='Select a saved connection.'; return
     fi
-    if ! ask 'Eliminare connessione? s/N: '; then return; fi
-    if [[ $REPLY != [sSyY] ]]; then notice='Eliminazione annullata.'; return; fi
+    if ! ask 'Delete connection? y/N: '; then return; fi
+    if [[ $REPLY != [yY] ]]; then notice='Deletion cancelled.'; return; fi
     if rm -f -- "$connections_dir/$id"; then
         reload
-        notice='Connessione eliminata.'
-    else notice='Impossibile eliminare la connessione salvata.'; fi
+        notice='Connection deleted.'
+    else notice='Cannot delete the saved connection.'; fi
 }
 
 connect_remote() {
@@ -2152,7 +2152,7 @@ connect_remote() {
     fi
     if ! connection_dialog "$protocol"; then return; fi
     result=$(mktemp) || return
-    local run_program_label="Connessione ${protocol^^}"
+    local run_program_label="${protocol^^} connection"
     exec {password_fd}< <(printf '%s' "$remote_password")
     trap ':' INT
     run_program 0 remote_mount "$protocol" "$remote_address" "$password_fd" "$result"
@@ -2163,7 +2163,7 @@ connect_remote() {
     IFS= read -r mount_path < "$result" || :
     rm -f -- "$result"
     if (( status != 0 )); then
-        notice="Connessione non riuscita: ${mount_path:-annullata}."
+        notice="Connection failed: ${mount_path:-cancelled}."
         return
     fi
     remote_labels["$mount_path"]="${protocol^^} $remote_address"
@@ -2174,14 +2174,14 @@ connect_remote() {
     local saved
     if saved=$(umask 077; mkdir -p -- "$profile_dir" && mktemp "$profile_dir/.last-$protocol.XXXXXX"); then
         if printf '%s\n' "$remote_address" > "$saved" && mv -T -- "$saved" "$profile_dir/last-$protocol"; then
-            notice="Connesso: ${protocol^^} $remote_address"
+            notice="Connected: ${protocol^^} $remote_address"
         else
             rm -f -- "$saved"
-            notice="Connesso; impossibile ricordare l'indirizzo."
+            notice="Connected; cannot remember the address."
         fi
     fi
     if ! save_connection "$protocol" "$remote_address"; then
-        notice='Connesso; impossibile salvare la connessione.'
+        notice='Connected; cannot save the connection.'
     fi
 }
 
@@ -2189,7 +2189,7 @@ change_directory() {
     local destination key path i saved_focus
     if [[ $1 == "$connections_root" ]]; then destination=$connections_root
     elif ! destination=$(cd -P -- "$1" 2>/dev/null && pwd -P); then
-        notice='Impossibile entrare nella directory.'
+        notice='Cannot enter the directory.'
         return 1
     fi
     key="$active_pane:$cwd"
@@ -2239,7 +2239,7 @@ enter_dir() {
         local archive_root=$REPLY resolved
         if ! resolved=$(realpath -e -- "$path") ||
            [[ $resolved != "$archive_root" && $resolved != "$archive_root/"* ]]; then
-            notice='Link esterno o non disponibile in questo archivio.'; return
+            notice='External or unavailable link in this archive.'; return
         fi
     fi
     if [[ $cwd == "$connections_root" ]]; then
@@ -2253,7 +2253,7 @@ enter_dir() {
                 local id=${path#profile:}
                 if [[ -v connection_protocols["$id"] ]]; then
                     connect_remote "${connection_protocols[$id]}" "${connection_addresses[$id]}"
-                else notice='Connessione salvata non disponibile.'; fi
+                else notice='Saved connection unavailable.'; fi
                 ;;
         esac
     elif [[ $path == '..' ]]; then
@@ -2263,12 +2263,12 @@ enter_dir() {
     elif [[ -f $path ]] && is_archive_file "$path"; then
         open_archive "$path"
     elif [[ -f $path && -x $path ]]; then
-        if is_archive_path "$cwd"; then notice='Archivio in sola lettura.'; return; fi
+        if is_archive_path "$cwd"; then notice='Read-only archive.'; return; fi
         run_executable
     elif [[ -f $path ]]; then
         open_document "$path"
     else
-        notice='File non disponibile o tipo non apribile.'
+        notice='File unavailable or unsupported type.'
     fi
 }
 
@@ -2281,12 +2281,12 @@ handle_mouse() {
     fi
     if (( MOUSE_BTN == 64 )); then
         ((cursor > 0)) && ((cursor-=1))
-        notice='Rotella su.'
+        notice='Scroll up.'
         return
     fi
     if (( MOUSE_BTN == 65 )); then
         ((cursor + 1 < ${#entries[@]})) && ((cursor+=1))
-        notice='Rotella giu.'
+        notice='Scroll down.'
         return
     fi
     [[ $MOUSE_ACTION != M ]] && return
@@ -2297,7 +2297,7 @@ handle_mouse() {
             cursor=$idx
             clear_filter
             idx=$cursor
-            # La colonna 3 contiene il simbolo di marcatura (*).
+            # Column 3 contains the selection mark (*).
             if (( x == pane_x+2 )) && [[ ${entries[idx]} != '..' ]]; then
                 select_current
                 return
@@ -2312,7 +2312,7 @@ handle_mouse() {
             fi
             last_click_ms=$now
             last_click_path=$path
-            notice='Riga selezionata con mouse.'
+            notice='Row selected with the mouse.'
         fi
         return
     fi
@@ -2330,7 +2330,7 @@ perform_key() {
     if is_archive_path "$cwd"; then
         case $1 in
             F1|F2|F4|F6|F7|F8|ATTRIBUTES|SYMLINK)
-                notice='Archivio in sola lettura: usa F5 per copiare i contenuti.'; return 0;;
+                notice='Read-only archive: use F5 to copy its contents.'; return 0;;
         esac
     fi
     if [[ $cwd == "$connections_root" ]]; then
@@ -2342,11 +2342,11 @@ perform_key() {
             SYMLINK) create_symlink; return 0;;
             F8) delete_saved_connection; return 0;;
             UP|DOWN|LEFT|RIGHT|BACK|HOME|END|PAGEUP|PAGEDOWN|ENTER|TAB|F10|ESC|'?'|k|j|h|l|r|R|q|Q) ;;
-            *) notice='Scegli Questo PC, SSH o FTP.'; return 0;;
+            *) notice='Choose This PC, SSH or FTP.'; return 0;;
         esac
     fi
     if [[ ( -n $filter || -n $content_filter ) && ( $1 == ENTER || $1 == RIGHT ) ]] && (( ${#entries[@]}<=1 )); then
-        notice='Nessuna corrispondenza: Ctrl+F modifica, Esc rimuove il filtro.'; return 0
+        notice='No matches: Ctrl+F edits, Esc clears the filter.'; return 0
     fi
     case $1 in
         ENTER|RIGHT|l|F1|F2|F3|F4|F5|F6|F7|F8|ATTRIBUTES|SYMLINK) clear_filter;;
@@ -2366,8 +2366,8 @@ perform_key() {
             show_hidden=$((1-show_hidden))
             cursor=1; scroll=0
             reload
-            if (( show_hidden )); then notice='File nascosti visibili.'
-            else notice='File nascosti non visibili.'; fi
+            if (( show_hidden )); then notice='Hidden files visible.'
+            else notice='Hidden files hidden.'; fi
             ;;
         F1) user_menu;;
         '?') show_help;;
@@ -2385,11 +2385,11 @@ perform_key() {
         F8) delete_items;;
         ATTRIBUTES) attributes_items;;
         SYMLINK) create_symlink;;
-        BAD_CHORD) notice='Ctrl+X: C per attributi, S per link simbolico.';;
-        r|R) reload; notice='Elenco aggiornato.';;
+        BAD_CHORD) notice='Ctrl+X: C for attributes, S for symbolic link.';;
+        r|R) reload; notice='List refreshed.';;
         ESC)
             if [[ -n $filter || -n $content_filter ]]; then clear_filter
-            else notice='Premi F10 per uscire.'; fi;;
+            else notice='Press F10 to quit.'; fi;;
         F10) return 1;;
         *) ;;
     esac
@@ -2409,8 +2409,8 @@ while :; do
         [[ $KEY == F10 ]] && break
         continue
     fi
-    # Applica in blocco la navigazione gia' in coda, poi disegna una sola volta.
-    # Il primo comando diverso rimane in KEY e viene eseguito normalmente.
+    # Batch queued navigation, then draw once.
+    # The first different command stays in KEY and executes normally.
     navigation_count=0
     while (( navigation_count < 256 )) && IFS= read -rt 0 -u9; do
         case $KEY in
