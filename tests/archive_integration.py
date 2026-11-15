@@ -1,4 +1,4 @@
-"""Navigazione archivi con GVfs/FUSE su bus privato, senza estrazione su disco."""
+"""Archive navigation with GVfs/FUSE on a private bus, without extracting to disk."""
 import hashlib
 import io
 import os
@@ -93,7 +93,7 @@ for suffix, mode in formats:
         deadline = time.monotonic() + 15
         while b"cartella" not in session.output[-12000:] and time.monotonic() < deadline:
             session.drain(.1)
-            if b"Apertura archivio non riuscita" in session.output[-3000:]:
+            if b"Cannot open archive" in session.output[-3000:]:
                 break
         if suffix == "7z" and b"does not support seeking" in session.output:
             assert hashlib.sha256(archive.read_bytes()).digest() == before
@@ -114,9 +114,9 @@ for suffix, mode in formats:
         session.key(m["ENTER"])
         assert (out / "file.txt").read_bytes() == content
         session.key(m["F6"])
-        assert b"sola lettura" in session.output[-5000:]
+        assert b"Read-only" in session.output[-5000:]
         session.key(m["F8"])
-        assert b"sola lettura" in session.output[-5000:]
+        assert b"Read-only" in session.output[-5000:]
         session.key(m["LEFT"])
         if suffix != "7z":
             session.key(b"\x06")
@@ -125,7 +125,7 @@ for suffix, mode in formats:
             session.key(m["ENTER"])
             assert b"privato.txt" not in session.output[-5000:], "Seguito link esterno"
             session.key(m["F7"])
-            assert b"sola lettura" in session.output[-5000:], "Uscita dalla radice archivio tramite link"
+            assert b"Read-only" in session.output[-5000:], "Uscita dalla radice archivio tramite link"
         session.key(b"\x06")
         session.type("annidato")
         session.key(m["ENTER"])
@@ -133,7 +133,7 @@ for suffix, mode in formats:
         deadline = time.monotonic() + 15
         while b"interno.txt" not in session.output[-12000:] and time.monotonic() < deadline:
             session.drain(.1)
-            if b"Apertura archivio non riuscita" in session.output[-3000:]:
+            if b"Cannot open archive" in session.output[-3000:]:
                 break
         if b"interno.txt" not in session.output[-12000:]:
             import re
@@ -163,7 +163,7 @@ for suffix, mode in formats:
                 session.drain(.1)
             session.key(b"\t")
             session.key(m["F5"])
-            assert b"destinazione in sola lettura" in session.output[-5000:]
+            assert b"Destination archive is read-only" in session.output[-5000:]
             session.key(b"\t")
             session.key(b"\x1b[H")
             session.key(m["DOWN"])
@@ -180,9 +180,9 @@ session = m["Session"](invalid)
 try:
     session.key(m["ENTER"])
     deadline = time.monotonic() + 10
-    while b"Apertura archivio non riuscita" not in session.output and time.monotonic() < deadline:
+    while b"Cannot open archive" not in session.output and time.monotonic() < deadline:
         session.drain(.1)
-    assert b"Apertura archivio non riuscita" in session.output
+    assert b"Cannot open archive" in session.output
     assert (invalid / "rotto.zip").read_text() == "Questo non e' uno ZIP"
     print("PASS corrupt archive error and original preservation", flush=True)
 finally:

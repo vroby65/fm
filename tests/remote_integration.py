@@ -1,8 +1,8 @@
-"""Integrazione FTP/SFTP reale su loopback, con bus D-Bus e credenziali temporanei.
+"""Real FTP/SFTP integration on loopback with temporary D-Bus and credentials.
 
-Opzionale: richiede paramiko, pyftpdlib e lo stack GIO/GVfs/FUSE installato.
-Con --keyring verifica anche salvataggio cifrato e riconnessione senza password.
-Non usa server, configurazioni SSH o portachiavi personali.
+Optional: requires paramiko, pyftpdlib and the GIO/GVfs/FUSE stack.
+With --keyring, also test encrypted storage and password-free reconnection.
+Never uses personal servers, SSH configuration or keyrings.
 """
 
 import sys, os, pathlib, tempfile, subprocess, threading, socket, errno, time, runpy, logging
@@ -304,7 +304,7 @@ try:
             deadline = time.monotonic() + 40
             while b"hello.txt" not in s.output and time.monotonic() < deadline:
                 s.drain(0.15)
-                if b"Connessione non riuscita:" in s.output:
+                if b"Connection failed:" in s.output:
                     break
             if b"hello.txt" not in s.output:
                 print(bytes(s.output[-3000:]).decode(errors="replace"), flush=True)
@@ -335,7 +335,7 @@ try:
             )
             s.key(m["LEFT"])
             s.drain(0.2)
-            assert b"Connessioni" in s.output[-12000:]
+            assert b"Connections" in s.output[-12000:]
             if protocol == "ssh" and kind == "password":
                 s.key(m["END"])
                 s.key(m["F2"])
@@ -358,10 +358,10 @@ try:
             collection = Secret.Collection.for_alias_sync(
                 service, "default", Secret.CollectionFlags.LOAD_ITEMS, None
             )
-            assert collection is not None, "Nessun portachiavi persistente"
+            assert collection is not None, "No persistent keyring"
             matching = [item for item in collection.get_items()
                         if item.get_attributes().get("port") == str(port)]
-            assert len(matching) == 1, "Password non salvata nel portachiavi"
+            assert len(matching) == 1, "Password not saved in the keyring"
             matching[0].load_secret_sync(None)
             assert matching[0].get_secret().get_text() == "test-secret"
             files = list((root / "data" / "keyrings").glob("*.keyring"))
@@ -388,7 +388,7 @@ try:
             assert f"fmtest@127.0.0.1:{port}".encode() in s.output[-12000:]
             s.key(b"\t")
             start = len(s.output)
-            s.key(m["ENTER"])  # password vuota: recupera dal portachiavi, se attivo
+            s.key(m["ENTER"])  # empty password: retrieve from the keyring, if enabled
             deadline = time.monotonic() + 10
             while b"hello.txt" not in s.output[start:] and time.monotonic() < deadline:
                 s.drain(0.15)
@@ -405,13 +405,13 @@ try:
                 s.drain(0.15)
             deadline = time.monotonic() + 8
             while (
-                b"Operazione completata:" not in s.output[start:]
+                b"Completed:" not in s.output[start:]
                 and time.monotonic() < deadline
             ):
                 s.drain(0.15)
-            if b"Operazione completata: 1." not in s.output[-8000:]:
+            if b"Completed: 1." not in s.output[-8000:]:
                 print(bytes(s.output[-2200:]).decode(errors="replace"), flush=True)
-            assert b"Operazione completata: 1." in s.output[start:]
+            assert b"Completed: 1." in s.output[start:]
             assert (remote / "upload.txt").read_text() == "upload " + protocol
             (upload / "move.txt").write_text("move " + protocol)
             s.key(b"r")
@@ -421,11 +421,11 @@ try:
             s.key(m["F6"])
             deadline = time.monotonic() + 8
             while (
-                b"Operazione completata:" not in s.output[start:]
+                b"Completed:" not in s.output[start:]
                 and time.monotonic() < deadline
             ):
                 s.drain(0.15)
-            assert b"Operazione completata: 1." in s.output[start:]
+            assert b"Completed: 1." in s.output[start:]
             assert (remote / "move.txt").read_text() == "move " + protocol
             assert not (upload / "move.txt").exists()
             print("PASS upload/move and remembered address", protocol, kind, flush=True)
@@ -493,7 +493,7 @@ try:
             for _ in range(3): s.key(m["LEFT"])
             s.key(m["END"])
             s.key(m["F8"])
-            s.type("s")
+            s.type("y")
             s.key(m["ENTER"])
             deadline = time.monotonic() + 5
             while bookmark_link.is_symlink() and time.monotonic() < deadline: s.drain(.1)
@@ -531,13 +531,13 @@ try:
                 s.key(m["ENTER"])
                 deadline = time.monotonic() + 35
                 while (
-                    b"Connessione non riuscita:" not in s.output
+                    b"Connection failed:" not in s.output
                     and time.monotonic() < deadline
                 ):
                     s.drain(0.15)
-                assert b"Connessione non riuscita:" in s.output
+                assert b"Connection failed:" in s.output
                 assert b"wrong-password" not in s.output
-                assert b"Autenticazione non riuscita" in s.output
+                assert b"Authentication failed" in s.output
                 if keyring is not None:
                     collection = Secret.Collection.for_alias_sync(
                         service, "default", Secret.CollectionFlags.LOAD_ITEMS, None
@@ -548,7 +548,7 @@ try:
             finally:
                 s.close()
     profiles = list((config / "fm" / "connections").iterdir())
-    assert len(profiles) == 3, "Connessioni duplicate o mancanti"
+    assert len(profiles) == 3, "Duplicate or missing connections"
     assert sum(f.read_text().splitlines()[2] == "Server laboratorio" for f in profiles) == 1
     print("PASS saved connections, rename and duplicate prevention", flush=True)
     for file in (config / "fm").rglob("*"):
@@ -559,7 +559,7 @@ try:
         assert file.stat().st_mode & 0o777 == 0o600
     if keyring is not None:
         files = list((root / "data" / "keyrings").glob("*.keyring"))
-        assert files, "Nessun portachiavi salvato su disco"
+        assert files, "No keyring saved on disk"
         for file in files:
             assert b"test-secret" not in file.read_bytes(), "Password non cifrata"
             assert b"fixture-keyring-password" not in file.read_bytes()

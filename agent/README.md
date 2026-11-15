@@ -1,48 +1,225 @@
-# Manutenzione di fm
+# Maintaining fm
 
-File manager TUI a uno o due pannelli per Linux. Il sorgente e punto di ingresso è `fm`, uno script Bash 4+ che usa stty, comandi GNU e /dev/tty. Non richiede librerie TUI.
+Linux one- or two-pane TUI file manager. The source and entry point is `fm`, a
+Bash 4+ script using stty, GNU commands and /dev/tty, without TUI libraries.
 
-Preferenza di vroby (14 novembre 2026): gli aggiornamenti di fm comprendono installazione locale e pubblicazione su GitHub. Dopo le verifiche, fare commit e push su origin/main senza chiedere una conferma aggiuntiva, preservando eventuali modifiche estranee.
+vroby's preference (14 November 2026): fm updates include local installation and
+GitHub publication. After verification, commit and push to origin/main without
+asking for additional confirmation, preserving unrelated changes.
 
-Lo script gestisce input tastiera e mouse, stato della selezione, rendering e operazioni sui file. Ripristina il terminale alla chiusura. Conservare la conferma per la cancellazione permanente e il divieto di sovrascrivere destinazioni esistenti. F5/F6 riportano il primo motivo di errore nella riga di stato, prima dei conteggi; gli errori di cp/mv passano da `safe`. Le variabili pubbliche ABFM_NO_ALT_SCREEN, ABFM_NO_COLOR e ABFM_ASCII sono documentate nel README.
+`main` is English; `italiano` preserves the Italian version. Keep UI, help,
+confirmation answers, documentation and PTY expectations consistent within each
+branch. Port functional updates explicitly, preserving each branch's language.
+The Italian README installation URL must point to `italiano`, not `main`.
 
-F1 apre `user_menu`, leggendo `${XDG_CONFIG_HOME:-$HOME/.config}/mc/menu` e, in fallback, `/etc/mc/mc.menu`. `load_user_menu` legge voci/script e condizioni MC (+, =, =+), `menu_condition` valuta da sinistra a destra senza eval, `expand_user_command` espande macro con quoting Bash, richieste e direttiva view. Le maiuscole usano lo stato del pannello opposto; %u/%U smarcano. Gli script sono codice esplicito del menu personale, eseguito via `run_program` nella cwd; %view usa PAGER/less. Conservare le personalizzazioni MC senza modificare il file originale. Testare con menu temporanei, mai eseguire le voci reali di installazione, posta o comandi remoti nelle verifiche. La barra F1–F10 usa tre larghezze e hitbox derivate dalle etichette. F2 apre `rename_dialog`: nome preselezionato, digitazione sostitutiva, frecce/Home/End/Backspace/Canc e Ctrl+U per editare; Tab e mouse fra campo e Rinomina/Annulla, Invio conferma ed Esc annulla. Un nome invariato è un no-op. F3 seleziona, F4 apre `$EDITOR` (fallback nano), F5 copia e F6 sposta nel pannello opposto (con un solo pannello chiedono la cartella di destinazione), F7 crea cartelle, F8 cancella dopo conferma, F10 esce; q/Q non chiudono, neppure con terminale troppo piccolo. Le modali hanno palette MC modarin256-thin (`CLR_DIALOG*`), titolo centrato e pulsanti Imposta/Annulla con focus e mouse. `modal_frame` calcola le coordinate condivise da `modal_buttons` e `modal_button_at`; `modal_cancel` prepara il messaggio e il ridisegno senza decidere il codice di ritorno del chiamante. Ctrl+X C apre `attributes_items`, una sola finestra per chmod e chown: griglia rwx e ottale, liste getent utenti/gruppi, Tab fra le cinque aree (griglia, utenti, gruppi, Imposta, Annulla). Nei terminali bassi griglia e liste alternano lo stesso spazio. Solo i campi modificati vengono applicati, prima chown poi chmod per preservare i bit speciali richiesti; chmod salta i link. `file_command` è comune a rinomina, copia, spostamento, mkdir, eliminazione, link, chmod e chown; riprova con `sudo --` solo gli errori C-locale di autorizzazione; `run_program` passa il terminale originale a sudo e restituisce il suo codice. `file_command` e `run_program` sono raggruppati accanto alle operazioni sui file; copia e spostamento condividono conteggi e gestione degli errori tramite `transfer_command`. La password rimane gestita da sudo, mai da fm; Ctrl+C ripristina la TUI. Testare sudo con stub PTY, senza privilegi reali. Resize ridisegna prima lo sfondo. Ctrl+X O è rimossa; Ctrl+X S e Ctrl+S creano un link assoluto `<nome>.lnk`. Durante la TUI `ixon` è disabilitato per ricevere Ctrl+S; editor e programmi figli ricevono il terminale originale.
+## Terminal and file operations
 
-Da 100 colonne vengono mostrati due pannelli. Tab o mouse cambia lato; `save_pane`/`load_pane` conservano cartella, cursore, scorrimento, filtro, visibilità dei nascosti e marcature. Le righe hanno colonne Nome, Dimensione (byte, IEC oltre dieci cifre) e Ultima modifica (data locale `gg/mm/aaaa hh:mm`), con intestazioni alla riga 3 e dati dalla riga 4; `entry_columns` mantiene larghezze e separatori anche in ASCII e sulle righe senza elementi, fino al fondo del pannello. Il tema usa grigio scuro, giallo tenue e selezione petrolio; le intestazioni delle colonne usano il giallo ANSI in grassetto di MC (`CLR_HEADER`). `draw_panel` usa stato locale Bash per disegnare anche il lato inattivo senza alterare quello attivo. Ctrl+F apre `filter_items`, dialog con campi locali nome/testo e pulsanti Cerca/Annulla. Invio applica insieme `filter` e `content_filter`; Esc/F10 annullano senza modificare i criteri esistenti. Ricerca letterale case-insensitive solo nella cwd, nessuna ricorsione: nome anche per directory, contenuto tramite GNU grep -iIFq solo nei file regolari (link simbolici, binari e file non leggibili esclusi). Tab/mouse cambiano focus, frecce/Home/End/Backspace/Canc/Ctrl+U editano. `pane_contents` affianca `pane_filters`; `search_cache`/`search_counts` conservano per pannello i risultati del filtro. `load_pane` chiama `reload cached "$id"` per evitare nuove letture dei contenuti durante ridisegno/cambio focus; applicazione, r e Ctrl+H chiamano reload senza cache. file_command e il ritorno da run_program invalidano le cache di entrambi i pannelli, aggiornando anche la vista opposta dopo modifiche ai file. Le variabili locali di draw_panel/menu_other_panel/add_shortcut includono content_filter per non alterare lo stato attivo. Esc nel pannello chiama clear_filter per entrambi i campi; Invio/Destra senza risultati non navigano. `change_directory` conserva in memoria di sessione `directory_focus`/`directory_scroll` per pannello+cwd e `directory_marks` per pannello+path (valore cwd), quindi ricarica la destinazione e ripristina solo le voci ancora visibili. Il cursore è ricordato per percorso, così inserimenti e cancellazioni non lo spostano su un altro file. La fotografia viene aggiornata a ogni uscita: marcature azzerate dalle operazioni non devono ricomparire. `selection_sources` ricorda per pannello la directory dell’ultima selezione F3; solo F5/F6 chiamano `collect transfer`, che a pannello unico recupera quelle sorgenti assolute da `directory_marks` anche navigando altrove. Se la sorgente è altrove, Invio vuoto nel prompt destinazione usa la cwd. Dopo il tentativo sono rimossi i record dei target trasferiti e il riferimento alla selezione. F8 e attributi restano locali alla cartella corrente. Sorgenti scomparse non devono causare fallback al file della destinazione. `go_parent` usa questa transizione ma evidenzia sempre la cartella appena lasciata, adattando lo scorrimento. Destra apre come prima. Clic su una riga, F3, apertura e comandi operativi azzerano il filtro tramite `clear_filter`, conservando elemento evidenziato e marcature; la posizione sullo schermo resta stabile per il doppio clic. Su/Giù continuano a scorrere i risultati filtrati. Ctrl+H mostra/nasconde file e cartelle con nome che inizia per punto nel pannello attivo (visibili all’avvio); azzera la selezione e mantiene il filtro. Ctrl+H usa il byte 0x08; Backspace per navigare usa 0x7f. Il resize conserva lo stato dei due pannelli.
+The script handles keyboard/mouse input, selection, rendering and file operations.
+Always restore the terminal on exit. Preserve permanent-deletion confirmation and
+protection against overwriting existing destinations. F5/F6 display the first
+error before summary counts; cp/mv errors pass through `safe`. Public variables
+ABFM_NO_ALT_SCREEN, ABFM_NO_COLOR and ABFM_ASCII are documented in the README.
 
-`selection_status` mostra la destinazione grezza di `readlink` (sanificata da safe) nella riga dell’aiuto per il pannello attivo, anche per link interrotti. `draw` conserva `painted_status` separato da notice e ridisegna la riga solo quando cambia; i messaggi non vengono sovrascritti.
+`file_command` handles rename, copy, move, mkdir, delete, link, chmod and chown.
+It retries only C-locale authorization errors with `sudo --`; `run_program` gives
+sudo the original terminal and returns its exit status. These helpers are grouped
+beside file operations. Copy/move share `transfer_command`, counts and errors.
+Only sudo handles passwords; Ctrl+C returns to the TUI. Test sudo through PTY
+stubs, never real privileges. Apply ownership before permissions because chown can
+clear special bits. chmod/chown are nonrecursive and chmod skips symlinks.
 
-`is_archive_file` riconosce le estensioni supportate; `open_archive` riusa l’helper Python di `remote_mount` con protocollo archive. L’URI di montaggio quota l’URI file, mentre il backend pubblica una radice con una seconda quotatura: usare quella per find_enclosing_mount. `archive_sources` associa ogni radice FUSE al file originale, display_path compone ricorsivamente i percorsi `!/`, go_parent torna alla cartella del file e lo evidenzia. Gli archivi annidati/remoti devono essere copiati come file compressi in una directory mktemp privata: il backend non legge direttamente gli altri mount GVfs. `archive_cache` registra solo questi mount privati; cleanup li smonta prima di rimuovere le copie, senza smontare i mount degli archivi originali condivisi. Non estrarre tutto l’archivio su disco.
+F2 opens `rename_dialog` with the name preselected; typing replaces it. Support
+arrows/Home/End/Backspace/Delete/Ctrl+U, Tab and mouse between field and buttons,
+Enter to confirm and Esc to cancel. Unchanged names do nothing. F3 marks, F4 opens
+$EDITOR (fallback nano), F5 copies and F6 moves to the other pane, asking for a
+destination in single-pane mode. F7 creates directories, F8 confirms deletion,
+F10 exits. q/Q never quit, even on a small terminal; F10 remains available there.
+Resize redraws the background first.
 
-`perform_key` blocca le operazioni di modifica negli archivi, `transfer_items` rifiuta destinazioni archivio e F6 da sorgenti archivio ricordate fuori dalla cwd; file_command non deve proporre sudo per percorsi archivio. F5 resta disponibile. Non eseguire file dentro gli archivi e non seguire link che escono dalla radice FUSE. La suite separata `/usr/bin/python3 tests/archive_integration.py` usa soltanto fixture e un bus/runtime temporaneo; copre navigazione/copia/ritorno/annidamento, due pannelli, sola lettura, link esterni e errori, con 7Z opzionale.
+Modal windows use the MC modarin256-thin palette (`CLR_DIALOG*`), centered titles,
+focused Apply/Cancel buttons and mouse support. `modal_frame` supplies coordinates
+to `modal_buttons` and `modal_button_at`; `modal_cancel` sets the notice and redraw
+without deciding the caller's return code. Ctrl+X C opens `attributes_items`:
+one window for chmod/chown with an rwx/octal grid, getent users/groups lists and
+five focus areas. Short terminals alternate grid and lists in the same space.
+Only modified fields are applied. Ctrl+X O is removed; Ctrl+X S and Ctrl+S create
+absolute `<name>.lnk` links. `ixon` is disabled in the TUI to receive Ctrl+S; child
+programs and editors receive the original terminal.
 
-Il valore virtuale `connections_root` (`@connections`) rappresenta il menu sopra `/`: reload genera local/ssh/ftp e chiama `load_saved_connections`, paint_entry mostra Questo PC/SSH/FTP e i nomi salvati. perform_key instrada F2/F8 alle operazioni sulle voci salvate e blocca gli altri comandi sui file. `change_directory` gestisce anche questo valore; go_parent entra nel menu dalla root locale e dalle radici in `remote_labels`. `remote_protocols` distingue FTP/SFTP per trasferimenti e permessi. display_path sostituisce i percorsi FUSE con etichette leggibili. Le viste mantengono lo stato virtuale come le directory normali.
+## Panes, filters and navigation
 
-`save_connection` scrive atomicamente tre righe (protocollo, indirizzo, nome) in `fm/connections/<sha256(protocollo + NUL + indirizzo)>`, permessi 0600. Il nome è solo un’etichetta; non usarlo come percorso. Lo stesso endpoint conserva l’alias senza duplicarsi. `load_saved_connections` importa last-ssh/last-ftp solo se la directory connections non esiste: conservarla dopo F8 evita di resuscitare le voci eliminate. F2 riusa rename_dialog; F8 elimina solo il file del profilo dopo conferma. Aprire `profile:<id>` passa protocollo/indirizzo a connect_remote, che mostra sempre il dialog con password vuota.
+At 100 columns there are two panes. Tab/mouse switches sides; `save_pane` and
+`load_pane` retain directory, cursor, scroll, filter, hidden-file visibility and
+marks. Columns Name, Size (bytes, IEC above ten digits) and Last modified (local
+`dd/mm/yyyy hh:mm`) have headings at row 3 and data from row 4. `entry_columns`
+maintains widths/separators in Unicode/ASCII, including empty rows to the bottom.
+The palette uses dark gray, muted yellow and teal selection; column headings use
+MC's bright bold ANSI yellow (`CLR_HEADER`). `draw_panel` uses local Bash state to
+render the inactive pane without changing the active one.
 
-`connection_dialog` chiede indirizzo/password in variabili locali di `connect_remote`; `remote_mount` contiene il solo helper Python/GIO opzionale. La password passa con process substitution su FD, mai argv/env/file; il file temporaneo di risultato contiene solo percorso o errore. GIO imposta PasswordSave.PERMANENTLY: GVfs salva le password riuscite nel portachiavi di sistema e le recupera alle successive connessioni prima di ask-password. La verifica dell’identità SSH richiede conferma nel terminale. Dopo il mount attendere brevemente l’esportazione FUSE: il recupero dal portachiavi può terminare prima che il percorso nativo sia disponibile. Nei file di fm ricordare soltanto indirizzo/profilo dopo connessione riuscita, con scrittura atomica 0600. Nessun fallback di salvataggio in chiaro se il portachiavi non è disponibile. Il campo password rimane vuoto, con indicazione di riuso dal portachiavi; F8 continua a eliminare solo il profilo. Non smontare automaticamente i mount GVfs condivisi all’uscita e non tentare sudo locale per permessi remoti. Le copie con endpoint FTP non preservano attributi Unix; F6 tra mount diversi fa copia, poi rimozione solo se la copia riesce.
+Ctrl+F opens `filter_items`, with local name/text fields and Search/Cancel buttons.
+Enter applies `filter` and `content_filter` together; Esc/F10 cancel without
+changing existing criteria. Search is literal, case-insensitive, current-directory
+only: names include directories, content uses GNU grep -iIFq only on readable
+regular files, excluding symlinks and binaries. Fields support Tab/mouse, arrows,
+Home/End/Backspace/Delete/Ctrl+U. `pane_contents` parallels `pane_filters`;
+`search_cache`/`search_counts` retain each pane's results. `load_pane` calls
+`reload cached "$id"` to avoid rereading contents during redraw/focus changes.
+Applying criteria, r and Ctrl+H call reload without cache. `file_command` and return
+from `run_program` invalidate both panes' caches. Local state in draw_panel,
+menu_other_panel and add_shortcut includes content_filter.
 
-Verifica remota facoltativa: `/usr/bin/python3 tests/remote_integration.py`, con paramiko/pyftpdlib e stack GVfs. I server usano solo loopback; chiavi, configurazioni SSH, bus D-Bus e servizi del portachiavi sono isolati in directory temporanee. Con `--keyring` avvia gnome-keyring-daemon su questo stesso bus privato, con HOME/XDG/control-directory temporanei e una password di fixture: verifica il segreto con libsecret, riavvia il daemon e smonta prima della riconnessione, controlla che il file keyring non contenga il segreto in chiaro. Il daemon viene terminato al termine; i test senza --keyring continuano a coprire la connessione senza servizio segreti. Mai provare credenziali o modifiche su dispositivi reali per i test automatici.
+Esc in a pane calls `clear_filter` for both fields. Enter/Right with zero matches
+does not navigate. Row clicks, F3, opening and operations clear filters while
+preserving the highlighted item and marks; screen position remains stable for
+double-clicks. Up/Down browse filtered results. Ctrl+H toggles dotfiles, clears
+selection and retains criteria. Ctrl+H uses 0x08; navigation Backspace uses 0x7f.
+Resize preserves both panes.
 
-Modificare `fm` per il comportamento, `README.md` per uso e installazione, `tests/smoke.py` per verifiche PTY. `.github/workflows/test.yml` esegue i controlli su GitHub. Installazione utente: `install -Dm755 fm "$HOME/.local/bin/fm"`.
+`change_directory` retains session memory in `directory_focus`/`directory_scroll`
+per pane+cwd and `directory_marks` per pane+path (value cwd), then restores only
+visible surviving entries. Remember cursor by path, not index. Update the snapshot
+on each departure; marks consumed by operations must not reappear. `go_parent`
+uses this transition but highlights the directory left and adjusts scroll.
+`selection_sources` remembers each pane's last explicit marking directory. Only
+F5/F6 call `collect transfer`, recovering absolute sources from `directory_marks`
+in single-pane mode even after navigating elsewhere. Empty Enter in the destination
+prompt uses cwd when sources are elsewhere. After an attempt, remove target marks
+from memory and clear the selection source. F8/attributes remain local to cwd.
+Missing sources must never fall back to the highlighted destination file.
 
-Prima di completare una modifica eseguire dalla radice:
+`selection_status` sanitizes the raw readlink target with `safe` and displays it
+for the active pane, including broken links. `draw` keeps `painted_status` separate
+from notice, redrawing only when changed; operation messages are not overwritten.
+
+`input_key` maps Esc followed within 0.50 seconds by 1…9/0 to F1…F9/F10 (F9 unused),
+and CSI 2~ (Ins) to F3. Esc alone cancels after timeout. F3/Ins/Space mark and advance;
+.. cannot be marked and the last row stops the cursor. `select_current` does not
+advance, preserving mouse behavior. On scroll, redraw only active rows without
+load_pane/reload on the other pane. The main loop batches up to 256 queued navigation
+keys, preserving and executing the first other command. The filter dialog reads
+characters independently of this loop. Test decoding, delayed Esc+digit, selection
+bounds, queued bursts and a following rename in one/two panes.
+
+## MC commands menu
+
+F1 calls `user_menu`, reading `${XDG_CONFIG_HOME:-$HOME/.config}/mc/menu`, falling
+back to `/etc/mc/mc.menu`. `load_user_menu` reads scripts/conditions (+, =, =+);
+`menu_condition` evaluates left to right without eval. `expand_user_command`
+shell-quotes macros, prompts and view directives. Uppercase macros use the opposite
+pane; %u/%U clear marks. Explicit menu scripts run via `run_program` in cwd; %view
+uses PAGER/less. Preserve personal MC customizations and their language without
+changing the source menu. Tests must use temporary menus and never run real
+installation, mail or remote commands. The F1–F10 bar has three widths with hitboxes
+derived from its labels.
+
+? opens `show_help` in panes and Connections, remaining literal in the filter.
+Help reads usage, wraps with GNU fold to available width and supports arrows,
+Pg/Home/End, wheel, resize and Close. Enter/Esc/?/F10 closes help without exiting fm.
+
+## MIME opening
+
+`enter_dir` retains directory → archive → executable precedence; other regular
+files go to `open_document` through Enter/Right/double-click. It invokes gio open
+with a quoted absolute path, stdin/stdout on /dev/null, stderr in mktemp, reporting
+sanitized errors without corrupting the TUI. No eval, extension table or MIME
+association changes. GIO is optional (libglib2.0-bin). Executables still use
+`run_executable` with the interactive terminal. Broken links never reach the
+launcher; archive external-link checks remain. PTY tests intercept only gio open,
+delegating other GIO operations. A separate real-GIO test uses temporary XDG MIME
+associations and desktop entries without changing personal preferences.
+
+## Archives
+
+`is_archive_file` recognizes extensions; `open_archive` uses the Python helper in
+`remote_mount` with protocol archive. Quote the file URI for mounting, then quote
+it a second time for the published root used by find_enclosing_mount.
+`archive_sources` maps FUSE roots to originals; `display_path` recursively composes
+`!/` paths; `go_parent` returns to and highlights the archive. Nested/remote archive
+files must be copied to a private mktemp directory because the backend cannot read
+other GVfs mounts directly. `archive_cache` tracks only those private mounts;
+cleanup unmounts before deleting copies, leaving shared original mounts alone.
+Never extract the entire archive.
+
+`perform_key` blocks archive modifications; `transfer_items` rejects archive
+destinations and F6 from remembered archive selections outside cwd. `file_command`
+must never propose sudo for archive paths. F5 stays available. Do not execute
+archive files or follow links outside the FUSE root. Separate archive integration
+tests use fixtures and a temporary bus/runtime, covering navigation/copy/return,
+nesting, two panes, read-only restrictions, external links and errors, with 7Z
+optional.
+
+## Connections and bookmarks
+
+The virtual `connections_root` (`@connections`) sits above `/`. reload generates
+local/ssh/ftp and calls `load_saved_connections`; paint_entry shows This PC/SSH/FTP
+and saved names. perform_key routes F2/F8 to saved-entry operations and blocks other
+file operations. `change_directory` handles the virtual root; go_parent enters it
+from local/remote roots. `remote_protocols` distinguishes FTP/SFTP. `display_path`
+replaces FUSE paths with readable labels; virtual views retain normal pane state.
+
+`save_connection` atomically writes protocol, address, name as three lines under
+`fm/connections/<sha256(protocol + NUL + address)>`, permissions 0600. Names are
+labels, never paths. Reconnecting preserves aliases without duplication.
+`load_saved_connections` imports last-ssh/last-ftp only when connections does not
+exist; preserve that directory after F8 so deleted profiles cannot reappear.
+F2 reuses rename_dialog; F8 confirms profile-only removal. `profile:<id>` passes
+protocol/address to connect_remote, always showing an empty password dialog.
+
+`connection_dialog` keeps address/password local to `connect_remote`.
+`remote_mount` contains the optional Python/GIO helper. Passwords pass through a
+process-substitution FD, never argv/env/files. Result files hold only a path/error.
+GIO uses PasswordSave.PERMANENTLY; GVfs stores successful passwords in the system
+keyring and retrieves them before ask-password. SSH host trust requires terminal
+confirmation. Wait briefly for FUSE export after mounting; keyring authentication
+can finish first. Remember addresses/profiles only after successful connection,
+with atomic 0600 writes. Never fall back to plaintext secrets. The field stays
+empty with keyring-reuse help. F8 only removes profiles; do not automatically
+unmount shared GVfs mounts on exit or try local sudo for remote permission errors.
+FTP copies do not preserve Unix attributes; cross-mount F6 removes only after a
+successful copy.
+
+`shortcuts_dir` is fm/shortcuts under XDG config; reload appends real symlinks,
+including broken ones, after profiles. With Connections in one pane, Ctrl+X S or
+Ctrl+S calls add_shortcut on the directory highlighted in the other, regardless
+of focus. Default basename.lnk, no overwrites. Without Connections, create_symlink
+retains normal behavior. Local targets are physical absolute paths; remote targets
+are quoted sftp:// or ftp:// URIs with no credentials. `remote_addresses` parallels
+labels/protocols to reconstruct endpoints. `open_shortcut` decodes URIs and reuses
+mounts or calls connect_remote with an additional remote path, retaining the
+normal dialog/keyring/profile behavior. F2 reuses rename_item with shortcuts_dir
+as destination; F8 confirms and uses rm without -r to remove only the link.
+Test creation, opening, persistence, rename, safe deletion, existing/broken links,
+duplicate protection, both focuses and help scrolling/resize/return. Remote tests
+cover saved paths with spaces/Unicode through reuse/restart/disconnection and
+SFTP password/key plus FTP.
+
+## Verification and installation
+
+Change `fm` for behavior, `README.md` for usage/installation and `tests/smoke.py`
+for PTY checks. `.github/workflows/test.yml` runs checks on GitHub. Install with
+`install -Dm755 fm "$HOME/.local/bin/fm"`.
+
+Before completing changes, run from the project root:
 
 ```bash
 bash -n fm
 python3 tests/smoke.py
 ```
 
-Quando disponibile, eseguire anche `shellcheck -S warning fm` per il controllo statico.
+When available, also run `shellcheck -S warning fm`. For manual verification run
+`./fm` interactively and quit with F10. Review the diff and update README/this guide
+when structure, public options, invariants or verification commands change.
+Tests use standard Python and temporary directories.
 
-Per una verifica manuale eseguire `./fm` in un terminale interattivo, quindi F10 per uscire. I test usano Python 3 standard e directory temporanee. Controllare il diff e aggiornare questa guida e il README quando cambiano struttura, opzioni pubbliche, invarianti o comandi di verifica.
+Optional remote verification: `/usr/bin/python3 tests/remote_integration.py`, with
+paramiko/pyftpdlib and GVfs. Servers are loopback only; SSH keys/config, D-Bus and
+keyring services are isolated in temporary directories. With `--keyring`, start
+gnome-keyring-daemon on that private bus, with temporary HOME/XDG/control-directory
+and a fixture password. Verify the secret with libsecret, restart the daemon,
+unmount before reconnection and check that keyring files do not contain plaintext
+secrets. Terminate the daemon afterward. Without --keyring, cover connections
+without secret services. Never test credentials or changes on real devices.
 
-Scorciatoie MC: input_key traduce Esc seguito entro 0,50 s da 1…9/0 in F1…F9/F10 (F9 non assegnato) e CSI 2~ (Ins) in F3. Esc da solo mantiene l’annullamento dopo il timeout. In perform_key F3/Ins/Spazio marcano e avanzano; .. resta non selezionabile e sull’ultima riga il cursore si ferma; select_current non sposta il cursore, preservando il comportamento del mouse. Ctrl+H alterna già i nascosti nel pannello attivo.
-
-Scorrimento: draw distingue il cambio scroll dal ridisegno completo e ridipinge solo le righe attive, senza load_pane/reload sul pannello inattivo. Il ciclo principale elabora fino a 256 tasti di navigazione già disponibili prima del ridisegno; conserva ed esegue il primo comando diverso senza scartarlo. Il dialog filtro legge autonomamente ogni carattere, fuori dal ciclo di navigazione. I test coprono decodifica Esc/Ins, Esc e cifra separati, selezione con avanzamento e limiti, raffiche con rinomina successiva su uno/due pannelli.
-
-Apertura MIME: enter_dir mantiene la precedenza directory → archivi → eseguibili; i restanti file regolari passano a open_document tramite Invio/Destra/doppio clic. open_document usa gio open con percorso assoluto quotato, stdin/stdout su /dev/null e stderr in mktemp per riportare l’errore sanificato nella notice senza sporcare la TUI. Nessun eval, tabella di estensioni o modifica delle associazioni. GIO è una dipendenza opzionale (libglib2.0-bin); gli eseguibili conservano run_executable e il terminale interattivo. I link interrotti non raggiungono il launcher; resta il controllo dei link esterni agli archivi. I test PTY intercettano solo gio open per evitare app personali, delegando gli altri sottocomandi al GIO reale; una prova separata usa il GIO reale con desktop entry e associazione PDF in XDG temporanei, senza cambiare le preferenze personali.
-
-Segnalibri in Connessioni: shortcuts_dir punta a fm/shortcuts nella configurazione XDG; reload aggiunge solo veri link simbolici, anche interrotti, dopo i profili remoti. Con due pannelli e la super-root in uno, Ctrl+X S/Ctrl+S chiama add_shortcut sulla cartella evidenziata nell’altro, indipendentemente dal focus. Nome iniziale basename.lnk, nessuna sovrascrittura; senza super-root create_symlink conserva il comportamento normale. Link locali a percorsi fisici assoluti; link remoti a URI sftp:// o ftp:// con percorso quotato, mai credenziali. remote_addresses affianca remote_labels/protocols per ricostruire l’endpoint; open_shortcut decodifica l’URI, riusa mount noti oppure chiama connect_remote con il percorso remoto aggiuntivo. Quest’ultimo mantiene dialog/password/portachiavi e salva il normale profilo dell’endpoint. F2 riusa rename_item con destinazione shortcuts_dir nel menu virtuale; F8 usa rm senza -r e conferma per eliminare solo il link. I test PTY coprono entrambi i focus e la persistenza; remote_integration.py verifica creazione/riuso/riavvio/disconnessione/riconnessione e rimozione su SFTP password/chiave e FTP, con spazi/Unicode nel percorso.
-
-? apre show_help durante la navigazione e in Connessioni; nel dialog filtro rimane un carattere letterale. La modale legge usage, impagina con fold GNU alla larghezza disponibile e supporta frecce/Pg/Home/End, rotella, resize e pulsante Chiudi. Invio/Esc/?/F10 chiudono l’aiuto, senza uscire da fm. Testare creazione/apertura/persistenza/rinomina/eliminazione sicura dei link, link preesistenti/interrotti/duplicati e aiuto con scorrimento/resize/ritorno.
+Optional archives: `/usr/bin/python3 tests/archive_integration.py`, using only
+fixtures and an isolated bus/runtime. Do not touch personal mounts.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test PTY; usa soltanto la libreria standard Python."""
+"""PTY smoke tests using only the Python standard library."""
 from __future__ import annotations
 
 import fcntl
@@ -136,7 +136,7 @@ def fixture(root: pathlib.Path):
 
 def test_escape_digit_and_insert_decoding():
     source = pathlib.Path(SCRIPT).read_text()
-    decoder = source[source.index("input_key() {"):source.index("# Inserimento in modalita'")]
+    decoder = source[source.index("input_key() {"):source.index("# Raw mode input:")]
     for sequence, expected in [(b"\x1b" + str(n).encode(), f"F{n or 10}") for n in range(10)] + [(b"\x1b[2~", "F3")]:
         result = subprocess.run(
             ["bash", "-c", decoder + '\nexec 9<&0; PENDING_CHAR=; input_key; printf "%s" "$KEY"'],
@@ -157,7 +157,7 @@ def test_selection_keys_advance_and_stop_at_last_entry():
                 session.key(key)  # marca l'ultimo senza tornare all'inizio
                 session.key(key)  # deseleziona l'ultimo
                 session.key(F8)
-                session.type("s")
+                session.type("y")
                 session.key(ENTER)
                 assert not (root / "a").exists()
                 assert (root / "b").read_text() == "b"
@@ -168,7 +168,7 @@ def test_selection_keys_advance_and_stop_at_last_entry():
                 session.key(b"\x1b[H")
                 session.key(key)  # .. non selezionabile e non avanza
                 session.key(F2)
-                assert b"Seleziona prima un elemento." in session.output[-1000:]
+                assert b"Select an item first." in session.output[-1000:]
             finally:
                 session.close()
 
@@ -251,7 +251,7 @@ def test_connection_shortcuts_create_open_rename_delete_and_restart():
                 session.key(ENTER)
                 assert renamed.is_symlink()
                 session.key(F8)
-                session.type("s")
+                session.type("y")
                 session.key(ENTER)
                 assert not renamed.is_symlink()
                 assert (target / "intatto.txt").read_text() == "intatto"
@@ -277,10 +277,10 @@ def test_connection_shortcuts_existing_broken_and_duplicate():
                 session.key(LEFT)
             session.key(END)
             session.key(ENTER)
-            assert b"Scorciatoia non disponibile" in session.output[-5000:]
+            assert b"Shortcut unavailable" in session.output[-5000:]
             session.key(b"\t")
             session.key(b"\x18s")
-            assert b"Esiste gia'" in session.output[-3000:]
+            assert b"An item with that name already exists" in session.output[-3000:]
             assert (links / "target.lnk").resolve() == target
             assert not (source / "target.lnk").exists(), "Il link deve nascere nella super-root"
             assert (links / "non-link").read_text() == "ignorato"
@@ -290,8 +290,8 @@ def test_connection_shortcuts_existing_broken_and_duplicate():
 
 def test_bookmark_requires_a_source_pane():
     source = pathlib.Path(SCRIPT).read_text()
-    helper = source[source.index('create_symlink() {'):source.index('# Le connessioni GVfs')]
-    for dual, message in ((0, 'due pannelli'), (1, 'cartella')):
+    helper = source[source.index('create_symlink() {'):source.index('# GVfs connections')]
+    for dual, message in ((0, 'two panes'), (1, 'directory')):
         script = helper + f"\ndual_pane={dual}; active_pane=0; cwd=@connections; connections_root=@connections; declare -a entries=(local) pane_dirs=(@connections @connections); file_command() {{ printf 'COMANDO_INATTESO'; }}; reload() {{ :; }}; add_shortcut() {{ printf 'COMANDO_INATTESO'; }}; create_symlink; printf '%s' \"$notice\""
         result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True)
         assert 'COMANDO_INATTESO' not in result.stdout
@@ -300,7 +300,7 @@ def test_bookmark_requires_a_source_pane():
 
 def test_remote_bookmark_uri_reconnects_to_saved_directory():
     source = pathlib.Path(SCRIPT).read_text()
-    helper = source[source.index('open_shortcut() {'):source.index('# Tre righe per voce:')]
+    helper = source[source.index('open_shortcut() {'):source.index('# Three lines per entry:')]
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         link = root / "Lavoro"
@@ -322,12 +322,12 @@ def test_question_help_scroll_resize_and_return():
         session = Session(root)
         try:
             session.key(b"?")
-            assert b"Istruzioni" in session.output[-15000:]
+            assert b"Help" in session.output[-15000:]
             session.key(END)
             assert b"ABFM_ASCII" in session.output[-15000:]
             session.resize(35)
             session.key(b"\x1b[H")
-            assert b"Istruzioni" in session.output[-8000:]
+            assert b"Help" in session.output[-8000:]
             session.key(ENTER)
             session.key(F2)
             session.type("ritrovato.txt")
@@ -339,9 +339,9 @@ def test_question_help_scroll_resize_and_return():
         try:
             session.key(LEFT)
             session.key(b"?")
-            assert b"Istruzioni" in session.output[-15000:]
+            assert b"Help" in session.output[-15000:]
             session.key(b"\x1b")
-            assert b"Questo PC" in session.output[-10000:]
+            assert b"This PC" in session.output[-10000:]
         finally:
             session.close()
 
@@ -365,7 +365,7 @@ def test_open_document_by_keyboard_and_double_click():
                     session.key(action)
                 session.drain(0.1)
                 assert json.loads(log.read_text()) == ["open", str(document)]
-                assert b"Apertura richiesta:" in session.output[-3000:]
+                assert b"Open requested:" in session.output[-3000:]
                 assert b"OUTPUT DEL LAUNCHER" not in session.output
                 assert not (work / "INATTESO").exists()
                 assert document.read_bytes() == b"%PDF-1.4\n"
@@ -435,7 +435,7 @@ def test_scrolling_redraws_only_active_list():
                 screen = session.output[start:]
                 assert b"file020" in screen
                 assert b"\x1b[1;" not in screen, "Scorrere non deve ridisegnare le cornici"
-                assert b"Dimensione" not in screen
+                assert b"Size" not in screen
                 session.key(F2)
                 session.type("scelto")
                 session.key(ENTER)
@@ -601,7 +601,7 @@ def test_f1_menu_mouse_scroll_and_resize():
         session = Session(work, env={"XDG_CONFIG_HOME": str(config)})
         try:
             session.mouse(0, 4, 25)  # F1 nella barra
-            assert b"Menu comandi (MC)" in session.output
+            assert b"Commands menu (MC)" in session.output
             session.key(END)
             assert b"Comando numero 25" in session.output
             session.key(ENTER)
@@ -611,7 +611,7 @@ def test_f1_menu_mouse_scroll_and_resize():
             session.resize(35)
             session.key(b"\x1b[H")
             session.key(DOWN)
-            session.mouse(0, 8, 24)  # Esegui nella finestra stretta
+            session.mouse(0, 8, 24)  # Run nella finestra stretta
             assert (work / "comando-1").read_text() == "done"
             session.key(ENTER)
         finally:
@@ -769,7 +769,7 @@ def test_pending_transfer_does_not_fall_back_when_source_disappears():
             session.type(str(out))
             session.key(ENTER)
             assert not list(out.iterdir()), "Copiato il file della destinazione al posto della sorgente"
-            assert b"Origine non disponibile" in session.output
+            assert b"Source unavailable" in session.output
         finally:
             session.close()
 
@@ -780,16 +780,16 @@ def test_connections_menu_above_root_and_local_return():
             session = Session(pathlib.Path("/"), cols=cols, env={"XDG_CONFIG_HOME": tmp})
             try:
                 session.key(LEFT)
-                for label in (b"Questo PC", b"SSH", b"FTP"):
+                for label in (b"This PC", b"SSH", b"FTP"):
                     assert label in session.output, label
                 start = len(session.output)
                 session.key(F2)
-                assert b"Nome attuale:" not in session.output[start:]
+                assert b"Current name:" not in session.output[start:]
                 session.key(b"\x1b[H")
                 session.key(ENTER)
                 session.key(b"\x1b[H")
-                session.key(ENTER)  # /.. dalla root riapre Connessioni
-                assert b"Connessioni" in session.output[-12000:]
+                session.key(ENTER)  # /.. dalla root riapre Connections
+                assert b"Connections" in session.output[-12000:]
             finally:
                 session.close()
 
@@ -801,8 +801,8 @@ def test_remote_connection_dialog_password_hidden_and_cancel():
             session.key(LEFT)
             session.key(DOWN)
             session.key(ENTER)
-            assert b"Connessione SSH" in session.output
-            assert b"portachiavi" in session.output
+            assert b"SSH connection" in session.output
+            assert b"keyring" in session.output
             session.type("user@example.invalid")
             session.key(b"\t")
             session.type("password-segreta")
@@ -812,7 +812,7 @@ def test_remote_connection_dialog_password_hidden_and_cancel():
             assert not (config / "fm" / "last-ssh").exists()
             session.key(DOWN)
             session.key(ENTER)
-            assert b"Connessione FTP" in session.output
+            assert b"FTP connection" in session.output
             session.key(b"\x1b")
             session.drain(.2)
         finally:
@@ -857,13 +857,13 @@ def test_saved_connections_rename_delete_and_restart():
             session.key(ENTER)
             assert file.exists()
             session.key(F8)
-            session.type("s")
+            session.type("y")
             session.key(ENTER)
             assert not file.exists()
             session.key(b"\x1b[H")
             start = len(session.output)
             session.key(F8)
-            assert b"Eliminare" not in session.output[start:], "Voce Questo PC eliminabile"
+            assert b"Delete" not in session.output[start:], "Voce This PC eliminabile"
         finally:
             session.close()
 
@@ -878,7 +878,7 @@ def test_saved_connection_opens_prefilled_dialog_without_password():
                 session.key(LEFT)
                 session.mouse(0, 10, 7)
                 session.mouse(0, 10, 7)
-                assert f"Connessione {protocol.upper()}".encode() in session.output
+                assert f"{protocol.upper()} connection".encode() in session.output
                 assert b"user@example.invalid" in session.output
                 session.type("other@example.invalid")  # cambia solo il dialog, poi annulla
                 session.key(b"\x1b")
@@ -903,7 +903,7 @@ def test_saved_connections_import_only_once():
             for _ in range(2):
                 session.key(END)
                 session.key(F8)
-                session.type("s")
+                session.type("y")
                 session.key(ENTER)
             assert not list((directory / "connections").iterdir())
         finally:
@@ -911,7 +911,7 @@ def test_saved_connections_import_only_once():
         session = Session(pathlib.Path("/"), env={"XDG_CONFIG_HOME": str(config)})
         try:
             session.key(LEFT)
-            assert not list((directory / "connections").iterdir()), "Connessioni eliminate ricreate"
+            assert not list((directory / "connections").iterdir()), "Connections eliminate ricreate"
         finally:
             session.close()
 
@@ -983,7 +983,7 @@ def test_mkdir_and_delete():
         assert (target / "nuova").is_dir(), "F7 non ha creato la directory"
         s.key(END)
         s.key(F8)
-        s.type("s")
+        s.type("y")
         s.key(ENTER)
         s.close()
         assert not (target / "nuova").exists(), "F8 non ha rimosso la directory"
@@ -1131,7 +1131,7 @@ def test_size_and_modification_columns():
             s = Session(root, cols=cols)
             try:
                 plain = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", bytes(s.output)).decode()
-                assert "Dimensione" in plain and "Ultima modifica" in plain
+                assert "Size" in plain and "Last modified" in plain
                 assert f"     12345│{expected_date}" in plain
                 assert "UP--DIR" in plain
                 for row in plain.split("\r\n"):
@@ -1159,7 +1159,7 @@ def test_reference_palette_and_highlighting():
             assert b"\x1b[38;5;144;48;5;237m" in out, "Sfondo grigio scuro e testo giallo mancanti"
             assert b"\x1b[38;5;252;48;5;23m" in out, "Selezione petrolio mancante"
             assert b"\x1b[1;38;5;144;48;5;237m" in out, "Directory gialle mancanti"
-            assert b"\x1b[38;5;120;48;5;237m" in out, "Eseguibili verdi mancanti"
+            assert b"\x1b[38;5;120;48;5;237m" in out, "Runbili verdi mancanti"
             assert b"\x1b[38;5;117;48;5;237m" in out, "Link ciano mancanti"
             assert b"\x1b[38;5;210;48;5;237m" in out, "Link interrotti rossi mancanti"
             assert b"\x1b[38;5;254;48;5;236m" in out, "Barra nera comandi mancante"
@@ -1316,7 +1316,7 @@ def test_execute_interactive_script():
             session.key(ENTER)
             session.key(ENTER)  # conferma ritorno al TUI
             assert marker.read_text() == "working", "stdin del processo non interattivo"
-            assert b"codice 0" in session.output, "Terminale non ripristinato"
+            assert b"exit code 0" in session.output, "Terminale non ripristinato"
         finally:
             session.close()
 
@@ -1371,7 +1371,7 @@ exec "/usr/bin/$command" "$@"
                     session.drain(0.2)
                     assert "-- " + command + " -- " in log.read_text()
                     assert b"password-di-prova" not in session.output, "Password mostrata a schermo"
-                    assert ("Non riusciti: 1" if cancel else "Non riusciti: 0").encode() in session.output
+                    assert ("Failed: 1" if cancel else "Failed: 0").encode() in session.output
                     if command == "chmod":
                         assert file.stat().st_mode & 0o777 == (0o644 if cancel else 0o600)
                 else:
@@ -1379,7 +1379,7 @@ exec "/usr/bin/$command" "$@"
                     assert b"invalid user" in session.output
                 assert file.read_text() == "conserva"
                 session.key(b"\x18c")
-                assert b"Permessi e proprietario" in session.output[-15000:]
+                assert b"Permissions and owner" in session.output[-15000:]
                 session.key(b"\x1b")
                 session.drain(0.2)
             finally:
@@ -1396,19 +1396,19 @@ def test_ctrl_x_unified_dialog():
         session = Session(root)
         try:
             session.key(b"\x18")
-            assert b"Permessi e proprietario" not in session.output
+            assert b"Permissions and owner" not in session.output
             session.key(b"c")
-            assert b"Permessi e proprietario" in session.output
-            assert b"Utenti" in session.output and b"Gruppi" in session.output
+            assert b"Permissions and owner" in session.output
+            assert b"Users" in session.output and b"Groups" in session.output
             session.type("600")
             session.key(b"\t")
             session.type(f"{os.getuid()}:{os.getgid()}")
             session.key(ENTER)
             assert file.stat().st_mode & 0o777 == 0o600
-            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
-            assert b"chmod 600: modificati 1" in session.output
+            assert f"chown {os.getuid()}:{os.getgid()}: changed 1".encode() in session.output
+            assert b"chmod 600: changed 1" in session.output
             session.key(b"\x18o")
-            assert b"Ctrl+X: C per attributi" in session.output
+            assert b"Ctrl+X: C for attributes" in session.output
         finally:
             session.key(b"\x1b")
             session.close()
@@ -1504,7 +1504,7 @@ def test_chmod_dialog_toggle_and_cancel():
         session = Session(root)
         try:
             session.key(b"\x18c")
-            assert b"Permessi e proprietario" in session.output
+            assert b"Permissions and owner" in session.output
             session.key(DOWN)   # gruppo / lettura
             session.key(RIGHT)  # gruppo / scrittura
             session.key(b" ")   # attiva il permesso scrittura al gruppo
@@ -1526,14 +1526,14 @@ def test_chown_dialog_group_tab_navigation():
         session = Session(root)
         try:
             session.key(b"\x18c\t")
-            assert b"Permessi e proprietario" in session.output
+            assert b"Permissions and owner" in session.output
             session.type(str(os.getuid()))
             session.key(b"\t")
             session.type(str(os.getgid()))
             session.key(ENTER)
             assert f.stat().st_uid == os.getuid()
             assert f.stat().st_gid == os.getgid()
-            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
+            assert f"chown {os.getuid()}:{os.getgid()}: changed 1".encode() in session.output
         finally:
             session.close()
 
@@ -1550,24 +1550,24 @@ def test_permission_dialog_mouse_buttons_and_resize():
         try:
             session.key(b"\x18c")
             session.mouse(0, 30, 8)  # scrittura gruppo
-            session.mouse(0, 38, 24)  # Imposta
+            session.mouse(0, 38, 24)  # Apply
             assert file.stat().st_mode & 0o777 == 0o664
             session.key(b"\x18c")
             session.type("777")
-            session.key(b"\t\t\t\t")  # Annulla
+            session.key(b"\t\t\t\t")  # Cancel
             session.key(ENTER)
             assert file.stat().st_mode & 0o777 == 0o664
             session.key(b"\x18c\t")
             session.type(f"{os.getuid()}:{os.getgid()}")
             session.mouse(0, 38, 24)
-            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
+            assert f"chown {os.getuid()}:{os.getgid()}: changed 1".encode() in session.output
             session.key(b"\x18c")
             session.resize(35)
             session.key(b"\t")
-            assert b"Gruppi" in session.output[-6000:]
+            assert b"Groups" in session.output[-6000:]
             session.key(b"\x1b")
             session.drain(0.2)
-            assert b"Modifica attributi" in session.output
+            assert b"Attribute changes" in session.output
         finally:
             session.key(b"\x1b")
             session.close()
@@ -1582,20 +1582,20 @@ def test_chown_mc_lists_and_cancel():
         session = Session(root)
         try:
             session.key(b"\x18c\t")
-            for label in (b"Utenti", b"Gruppi", b"File", b"Imposta", b"Annulla"):
+            for label in (b"Users", b"Groups", b"File", b"Apply", b"Cancel"):
                 assert label in session.output[-12000:], label
             session.key(DOWN)
             session.key(b"\t")
             session.key(DOWN)
             session.key(b"\t")
-            session.key(b"\t")  # Annulla
+            session.key(b"\t")  # Cancel
             session.key(ENTER)
-            assert b"Modifica attributi annullata" in session.output
+            assert b"Attribute changes cancelled" in session.output
             assert file.stat().st_uid == os.getuid()
             session.key(b"\x18c\t")
             session.type(f"{os.getuid()}:{os.getgid()}")
             session.key(ENTER)
-            assert f"chown {os.getuid()}:{os.getgid()}: modificati 1".encode() in session.output
+            assert f"chown {os.getuid()}:{os.getgid()}: changed 1".encode() in session.output
             session.key(b"\x18c\t")
             session.key(UP)
             session.key(DOWN)
@@ -1606,7 +1606,7 @@ def test_chown_mc_lists_and_cancel():
             import pwd
             import grp
             spec = f"{pwd.getpwuid(os.getuid()).pw_name}:{grp.getgrgid(os.getgid()).gr_name}"
-            assert f"chown {spec}: modificati 1".encode() in session.output
+            assert f"chown {spec}: changed 1".encode() in session.output
         finally:
             session.close()
 
@@ -1656,7 +1656,7 @@ exec "/usr/bin/$command" "$@"
                 elif operation == "delete":
                     session.key(F8)
                     assert not log.exists(), "sudo prima della conferma di eliminazione"
-                    session.type("s")
+                    session.type("y")
                     session.key(ENTER)
                 else:
                     session.key(b"\x18s")
@@ -1685,7 +1685,7 @@ def test_rename_dialog_edit_cancel_and_mouse():
         session = Session(root)
         try:
             session.key(F2)
-            assert b"Nome attuale:" in session.output and b"Nuovo nome:" in session.output
+            assert b"Current name:" in session.output and b"New name:" in session.output
             session.type("annullato.txt")
             session.key(b"\t\t")
             session.key(ENTER)
@@ -1700,7 +1700,7 @@ def test_rename_dialog_edit_cancel_and_mouse():
             assert edited.read_text() == "conserva"
             session.key(F2)
             session.type("rinominato.txt")
-            session.mouse(0, 39, 18)  # pulsante Rinomina
+            session.mouse(0, 39, 18)  # pulsante Rename
             assert (root / "rinominato.txt").read_text() == "conserva"
         finally:
             session.key(b"\x1b")
@@ -1842,7 +1842,7 @@ def test_filter_dialog_content_and_actions():
         session = Session(root, env={"FM_TEST_OPEN_LOG": str(log)})
         try:
             session.key(b"\x06")
-            assert b"Nome file:" in session.output and b"Testo contenuto:" in session.output
+            assert b"File name:" in session.output and b"Content text:" in session.output
             session.type("report")
             session.key(b"\t")
             session.type("speciale [x]")
@@ -1879,7 +1879,7 @@ def test_filter_dialog_cancel_resize_and_content_only():
                 session.key(b"\t")
                 session.type("AGO")
                 session.key(ENTER)
-                assert b"Risultati: 1." in session.output[-10000:]
+                assert b"Results: 1." in session.output[-10000:]
                 assert b"escluso.txt" not in session.output[-10000:]
                 session.key(b"\x06")
                 session.key(b"\x15")
@@ -1894,7 +1894,7 @@ def test_filter_dialog_cancel_resize_and_content_only():
                 session.type("nessun-file")
                 session.key(ENTER)
                 session.key(ENTER)
-                assert b"Nessuna corrispondenza" in session.output[-3000:]
+                assert b"No matches" in session.output[-3000:]
                 session.key(b"\x1b")
             finally:
                 session.close()
@@ -2027,7 +2027,7 @@ def test_filter_dialog_and_enter_opens_or_runs():
             session.type("inesistente")
             session.key(ENTER)
             session.key(ENTER)
-            assert b"Nessuna corrispondenza" in session.output
+            assert b"No matches" in session.output
             session.key(b"\x1b")
             session.drain(.2)
         finally:
@@ -2102,7 +2102,7 @@ def test_filter_names_and_reset():
             assert b"beta.txt" not in session.output[start:]
             session.key(F3)
             session.key(F8)
-            session.type("s")
+            session.type("y")
             session.key(ENTER)
             assert not (root / "ALPHA.txt").exists()
             assert (root / "beta.txt").exists()
@@ -2122,7 +2122,7 @@ def test_dual_move_directory_and_failure_reasons():
         session = Session(src, cols=120)
         try:
             session.key(F6)
-            assert b"Stessa cartella" in session.output
+            assert b"Source and destination are the same directory" in session.output
             assert (src / "tree" / "deep.txt").exists()
             session.key(b"\t")
             session.key(LEFT)
@@ -2136,7 +2136,7 @@ def test_dual_move_directory_and_failure_reasons():
             (src / "tree" / "keep.txt").write_text("conserva")
             session.key(b"r")
             session.key(F6)
-            assert b"Nome gia' presente" in session.output
+            assert b"Name already exists" in session.output
             assert (src / "tree" / "keep.txt").read_text() == "conserva"
             assert (dst / "tree" / "deep.txt").read_text() == "profondo"
         finally:
@@ -2244,7 +2244,7 @@ def test_dual_no_overwrite_and_literal_filter():
             session.type("nessuna-corrispondenza")
             session.key(ENTER)
             session.key(F8)
-            assert b"Seleziona prima un elemento" in session.output[-3000:]
+            assert b"Select an item first" in session.output[-3000:]
         finally:
             session.close()
 
@@ -2356,8 +2356,29 @@ def test_filter_clears_on_directory_open_and_double_click():
                 session.close()
 
 
+def test_english_help_and_delete_confirmation():
+    help_text = subprocess.check_output([SCRIPT, "--help"], env={**os.environ, "LC_ALL": "C.UTF-8"})
+    assert b"Usage: fm" in help_text
+    assert b"Environment options:" in help_text
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        target = root / "keep.txt"
+        target.write_text("keep")
+        session = Session(root)
+        try:
+            session.key(F8)
+            assert b"Delete 1 item(s)? y/N:" in session.output
+            session.key(ENTER)
+            assert target.exists()
+            session.key(F8)
+            session.key(b"y" + ENTER)
+            assert not target.exists()
+        finally:
+            session.close()
+
+
 if __name__ == "__main__":
-    tests = [test_content_filter_panes_cache_and_refresh, test_filter_dialog_mouse_buttons_and_editing, test_filter_dialog_content_and_actions, test_filter_dialog_cancel_resize_and_content_only, test_connection_shortcuts_create_open_rename_delete_and_restart, test_connection_shortcuts_existing_broken_and_duplicate, test_question_help_scroll_resize_and_return, test_remote_bookmark_uri_reconnects_to_saved_directory, test_bookmark_requires_a_source_pane, test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_filter_dialog_spaces_backspace_and_escape, test_filter_dialog_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
+    tests = [test_english_help_and_delete_confirmation, test_content_filter_panes_cache_and_refresh, test_filter_dialog_mouse_buttons_and_editing, test_filter_dialog_content_and_actions, test_filter_dialog_cancel_resize_and_content_only, test_connection_shortcuts_create_open_rename_delete_and_restart, test_connection_shortcuts_existing_broken_and_duplicate, test_question_help_scroll_resize_and_return, test_remote_bookmark_uri_reconnects_to_saved_directory, test_bookmark_requires_a_source_pane, test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_filter_dialog_spaces_backspace_and_escape, test_filter_dialog_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
              test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
@@ -2379,4 +2400,4 @@ if __name__ == "__main__":
     for test in tests:
         test()
         print(f"OK {test.__name__}")
-    print(f"{len(tests)} test superati")
+    print(f"{len(tests)} tests passed")
