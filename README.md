@@ -1,5 +1,7 @@
 # fm
 
+Questa è la versione italiana, mantenuta nel branch `italiano`. La versione inglese è nel [branch `main`](https://github.com/vroby65/fm/tree/main). Per scegliere questa versione in un clone, eseguire `git switch italiano`.
+
 File manager **TUI a uno o due pannelli**, ispirato ai tasti funzione di Midnight Commander e pensato per una piccola finestra terminale in **ai-bar**.
 
 Il programma è scritto in **Bash 4+**, usa **mouse xterm/SGR**, il **tema grigio grafite** con convenzioni di navigazione simili a Lynx e cornici Unicode box-drawing (`┌─┐`, `│ │`, `└─┘`), con fallback ASCII. **Niente ncurses, dialog, fzf o dipendenze TUI**: su Linux servono soltanto Bash, `stty` e i comandi GNU di base (`cp`, `mv`, `mkdir`, `rm`, `grep`).
@@ -9,7 +11,7 @@ Il programma è scritto in **Bash 4+**, usa **mouse xterm/SGR**, il **tema grigi
 Per scaricare e installare `fm` nella directory utente `~/.local/bin`, senza `sudo`, senza compilare e senza clonare il repository, esegui:
 
 ```bash
-mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/main/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
+mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
 ```
 
 Esegui subito il programma con:
@@ -18,12 +20,12 @@ Esegui subito il programma con:
 "$HOME/.local/bin/fm"
 ```
 
-Ripetere il comando di installazione scarica la versione aggiornata da `main`. Per il download e' necessario `curl`; il file manager in esecuzione non richiede `curl` ne' librerie TUI. Se `~/.local/bin` e' gia' nel `PATH`, basta digitare `fm` (anche da Fish).
+Ripetere il comando di installazione scarica la versione italiana aggiornata da `italiano`. Per il download e' necessario `curl`; il file manager in esecuzione non richiede `curl` ne' librerie TUI. Se `~/.local/bin` e' gia' nel `PATH`, basta digitare `fm` (anche da Fish).
 
 ## Avvio
 
 ```bash
-git clone https://github.com/vroby65/fm.git
+git clone --branch italiano https://github.com/vroby65/fm.git
 cd fm
 ./fm
 ./fm "$HOME/Documenti"

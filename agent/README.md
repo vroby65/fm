@@ -1,5 +1,7 @@
 # Manutenzione di fm
 
+Il branch `italiano` mantiene interfaccia, conferme, documentazione e test in italiano; `main` è in inglese. Applicare gli aggiornamenti funzionali a entrambi, conservando la lingua di ciascuno. Per modifiche specifiche alla versione italiana, commit e push vanno su `italiano`.
+
 File manager TUI a uno o due pannelli per Linux. Il sorgente e punto di ingresso è `fm`, uno script Bash 4+ che usa stty, comandi GNU e /dev/tty. Non richiede librerie TUI.
 
 Preferenza di vroby (14 novembre 2026): gli aggiornamenti di fm comprendono installazione locale e pubblicazione su GitHub. Dopo le verifiche, fare commit e push su origin/main senza chiedere una conferma aggiuntiva, preservando eventuali modifiche estranee.
