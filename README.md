@@ -33,7 +33,7 @@ Per la versione del branch `main`, sostituire `/italiano/` con `/main/` nell'URL
 ## Getting started
 
 ```bash
-git clone --branch italiano https://github.com/vroby65/fm.git
+git clone https://github.com/vroby65/fm.git
 cd fm
 ./fm
 ./fm "$HOME/Documents"
