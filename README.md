@@ -1,8 +1,7 @@
 # fm
 
-Questa è la versione italiana, mantenuta nel branch `italiano`. La versione inglese è nel [branch `main`](https://github.com/vroby65/fm/tree/main). Per scegliere questa versione in un clone, eseguire `git switch italiano`.
-
-File manager **TUI a uno o due pannelli**, ispirato ai tasti funzione di Midnight Commander e pensato per una piccola finestra terminale in **ai-bar**.
+A **one- or two-pane TUI file manager**, inspired by Midnight Commander's function
+keys and designed to fit a small terminal window in **ai-bar**.
 
 Written in **Bash 4+**, with **xterm/SGR mouse support**, a **graphite gray theme**,
 Lynx-style navigation and Unicode box-drawing frames (`┌─┐`, `│ │`, `└─┘`) with an
@@ -11,30 +10,39 @@ Bash, `stty` and basic GNU utilities, including `cp`, `mv`, `mkdir`, `rm`, `grep
 `stat`, `numfmt` and `fold`.
 
 `main` contains the English version. The [italiano branch](https://github.com/vroby65/fm/tree/italiano)
-contains the Italian version. In a clone, use `git switch italiano` to select it.
-Functional updates must be ported to each branch while retaining its language.
+has Italian installation instructions; previous merges have also aligned its
+current scripts and tests with the English version. In a clone, use
+`git switch italiano` to select that branch.
 
 ## Quick installation
 
-Download and install the English version in `~/.local/bin`, without sudo,
+Download and install the English versions of `fm` and `fmedit` in `~/.local/bin`, without sudo,
 compilation or cloning the repository:
 
 ```bash
-mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
+mkdir -p "$HOME/.local/bin" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/main/fm" -o "$HOME/.local/bin/fm" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/main/fmedit" -o "$HOME/.local/bin/fmedit" &&
+chmod +x "$HOME/.local/bin/fm" "$HOME/.local/bin/fmedit"
 ```
 
-For the Italian version, use this command instead:
+To install from the `italiano` branch, use these commands instead:
 
 ```bash
-mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
+mkdir -p "$HOME/.local/bin" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fmedit" -o "$HOME/.local/bin/fmedit" &&
+chmod +x "$HOME/.local/bin/fm" "$HOME/.local/bin/fmedit"
 ```
 
-Ripetere il comando di installazione scarica la versione italiana aggiornata da `italiano`. Per il download e' necessario `curl`; il file manager in esecuzione non richiede `curl` ne' librerie TUI. Se `~/.local/bin` e' gia' nel `PATH`, basta digitare `fm` (anche da Fish).
+Run `"$HOME/.local/bin/fm"`, or simply `fm` if `~/.local/bin` is in your PATH
+(including from Fish). Repeat the corresponding installation command to update
+that branch. Only downloading requires `curl`.
 
 ## Getting started
 
 ```bash
-git clone --branch italiano https://github.com/vroby65/fm.git
+git clone https://github.com/vroby65/fm.git
 cd fm
 ./fm
 ./fm "$HOME/Documents"
@@ -44,6 +52,7 @@ Install from the checked-out source with:
 
 ```bash
 install -Dm755 fm "$HOME/.local/bin/fm"
+install -Dm755 fmedit "$HOME/.local/bin/fmedit"
 ```
 
 Requires an interactive terminal of at least **35 columns × 12 rows**; **70+
@@ -61,6 +70,23 @@ ABFM_ASCII=1 fm
 ```
 
 `NO_COLOR` also disables colors. Unicode frames depend on a UTF-8 locale.
+
+## Included editor: fmedit
+
+The repository also includes `fmedit`, a standalone Bash terminal editor, its
+[usage guide](FMEDIT.md) and `tests/test_editor.py`. Both programs install from
+this repository using the commands above. Run `fmedit notes.txt` directly, or
+choose it for **F4** in fm:
+
+```bash
+EDITOR=fmedit fm
+```
+
+From an uninstalled checkout, use `EDITOR="$PWD/fmedit" ./fm`. F4 continues to
+respect `$EDITOR`, falling back to `nano` when unset. fmedit does not change your
+EDITOR setting or desktop MIME associations. **F2 / Ctrl+S** saves, **F10** saves
+and quits, and **Esc / Ctrl+Q** asks how to handle unsaved changes. See the guide
+for selection, clipboard, undo/redo, search and limitations.
 
 ## Theme and navigation
 
@@ -364,7 +390,9 @@ use only the Python standard library:
 
 ```bash
 bash -n fm
+bash -n fmedit
 python3 tests/smoke.py
+python3 -m unittest discover -s tests -p test_editor.py -v
 shellcheck -S warning fm    # when installed
 ```
 

@@ -10,6 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Syntax check
-        run: bash -n fm
+        run: |
+          bash -n fm
+          bash -n fmedit
       - name: PTY smoke tests
         run: python3 tests/smoke.py
+      - name: Editor buffer and PTY tests
+        run: python3 -m unittest discover -s tests -p test_editor.py -v

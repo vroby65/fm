@@ -1,6 +1,6 @@
 # Manutenzione di fm
 
-Il branch `italiano` mantiene interfaccia, conferme, documentazione e test in italiano; `main` è in inglese. Applicare gli aggiornamenti funzionali a entrambi, conservando la lingua di ciascuno. Per modifiche specifiche alla versione italiana, commit e push vanno su `italiano`.
+Mantenere gli aggiornamenti funzionali su `main` e `italiano`. I merge precedenti hanno allineato i sorgenti e i test di entrambi alla versione inglese; le nuove istruzioni di installazione e la guida editor di `italiano` sono in italiano. Per modifiche specifiche al branch `italiano`, commit e push vanno su `italiano`.
 
 File manager TUI a uno o due pannelli per Linux. Il sorgente e punto di ingresso è `fm`, uno script Bash 4+ che usa stty, comandi GNU e /dev/tty. Non richiede librerie TUI.
 
@@ -51,3 +51,13 @@ without secret services. Never test credentials or changes on real devices.
 
 Optional archives: `/usr/bin/python3 tests/archive_integration.py`, using only
 fixtures and an isolated bus/runtime. Do not touch personal mounts.
+
+## Bundled fmedit
+
+`fmedit` and `tests/test_editor.py` are included in this repository. User commands
+and limits are in [FMEDIT.md](../FMEDIT.md); editor maintenance invariants are in
+[fmedit.md](fmedit.md). F4 still uses EDITOR with nano as fallback. Install both
+scripts with `install -Dm755 fmedit "$HOME/.local/bin/fmedit"` in addition to fm.
+Run `bash -n fmedit` and
+`python3 -m unittest discover -s tests -p test_editor.py -v` as well as fm checks;
+GitHub Actions runs both suites. Keep future editor updates and their tests here.
