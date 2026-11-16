@@ -1,8 +1,7 @@
 # fm
 
-Questo è il branch `italiano`; il branch principale è [main](https://github.com/vroby65/fm/tree/main). Per scegliere questo branch in un clone, eseguire `git switch italiano`.
-
-File manager **TUI a uno o due pannelli**, ispirato ai tasti funzione di Midnight Commander e pensato per una piccola finestra terminale in **ai-bar**.
+A **one- or two-pane TUI file manager**, inspired by Midnight Commander's function
+keys and designed to fit a small terminal window in **ai-bar**.
 
 Written in **Bash 4+**, with **xterm/SGR mouse support**, a **graphite gray theme**,
 Lynx-style navigation and Unicode box-drawing frames (`┌─┐`, `│ │`, `└─┘`) with an
@@ -10,14 +9,24 @@ ASCII fallback. No ncurses, dialog, fzf or TUI libraries. Local operations requi
 Bash, `stty` and basic GNU utilities, including `cp`, `mv`, `mkdir`, `rm`, `grep`,
 `stat`, `numfmt` and `fold`.
 
-Le istruzioni di questo README si riferiscono al branch `italiano`. I precedenti
-merge hanno allineato i sorgenti e i test alla versione inglese di `main`;
-attualmente anche in questo branch interfaccia e conferme sono in inglese.
+`main` contains the English version. The [italiano branch](https://github.com/vroby65/fm/tree/italiano)
+has Italian installation instructions; previous merges have also aligned its
+current scripts and tests with the English version. In a clone, use
+`git switch italiano` to select that branch.
 
-## Installazione rapida
+## Quick installation
 
-Installare `fm` e `fmedit` da questo branch in `~/.local/bin`, senza sudo,
-compilazione o clone:
+Download and install the English versions of `fm` and `fmedit` in `~/.local/bin`, without sudo,
+compilation or cloning the repository:
+
+```bash
+mkdir -p "$HOME/.local/bin" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/main/fm" -o "$HOME/.local/bin/fm" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/main/fmedit" -o "$HOME/.local/bin/fmedit" &&
+chmod +x "$HOME/.local/bin/fm" "$HOME/.local/bin/fmedit"
+```
+
+To install from the `italiano` branch, use these commands instead:
 
 ```bash
 mkdir -p "$HOME/.local/bin" &&
@@ -26,9 +35,9 @@ curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fmedit" -o "$H
 chmod +x "$HOME/.local/bin/fm" "$HOME/.local/bin/fmedit"
 ```
 
-Ripetere i comandi per aggiornare entrambi. Per scaricare serve `curl`.
-Eseguire `fm` o `fmedit` se `~/.local/bin` è nel PATH (anche da Fish).
-Per la versione del branch `main`, sostituire `/italiano/` con `/main/` nell'URL.
+Run `"$HOME/.local/bin/fm"`, or simply `fm` if `~/.local/bin` is in your PATH
+(including from Fish). Repeat the corresponding installation command to update
+that branch. Only downloading requires `curl`.
 
 ## Getting started
 
@@ -62,22 +71,22 @@ ABFM_ASCII=1 fm
 
 `NO_COLOR` also disables colors. Unicode frames depend on a UTF-8 locale.
 
-## Editor incluso: fmedit
+## Included editor: fmedit
 
-Il repository comprende anche `fmedit`, editor Bash autonomo, la sua
-[guida d'uso](FMEDIT.md) e `tests/test_editor.py`. I comandi sopra installano
-entrambi i programmi da questo repository. Avviare `fmedit appunti.txt`, oppure
-sceglierlo per **F4** in fm:
+The repository also includes `fmedit`, a standalone Bash terminal editor, its
+[usage guide](FMEDIT.md) and `tests/test_editor.py`. Both programs install from
+this repository using the commands above. Run `fmedit notes.txt` directly, or
+choose it for **F4** in fm:
 
 ```bash
 EDITOR=fmedit fm
 ```
 
-Dal checkout senza installazione: `EDITOR="$PWD/fmedit" ./fm`. F4 continua a
-usare `$EDITOR`, con fallback a `nano` se non impostato. L'installazione non cambia
-EDITOR né le associazioni MIME. **F2 / Ctrl+S** salva, **F10** salva ed esce,
-**Esc / Ctrl+Q** chiede come gestire le modifiche non salvate. La guida descrive
-selezione, appunti, annulla/ripeti, ricerca e limiti.
+From an uninstalled checkout, use `EDITOR="$PWD/fmedit" ./fm`. F4 continues to
+respect `$EDITOR`, falling back to `nano` when unset. fmedit does not change your
+EDITOR setting or desktop MIME associations. **F2 / Ctrl+S** saves, **F10** saves
+and quits, and **Esc / Ctrl+Q** asks how to handle unsaved changes. See the guide
+for selection, clipboard, undo/redo, search and limitations.
 
 ## Theme and navigation
 
