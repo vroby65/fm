@@ -1751,6 +1751,28 @@ def test_f4_editor_interactive():
             session.close()
 
 
+def test_f4_bundled_fmedit_save_and_return():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        target = root / "a file.txt"
+        target.write_text("before")
+        editor = pathlib.Path(SCRIPT).with_name("fmedit")
+        session = Session(root, env={"EDITOR": str(editor)})
+        try:
+            session.key(F4)
+            assert b"fmedit" in session.output
+            session.key(b"\x01")  # Select all in the real bundled editor.
+            session.type("after")
+            session.key(F10)  # Save and return to fm.
+            assert target.read_text() == "after"
+            session.key(F7)
+            session.type("after-editor")
+            session.key(ENTER)
+            assert (root / "after-editor").is_dir()
+        finally:
+            session.close()
+
+
 def test_move_no_overwrite_and_cancel():
     with tempfile.TemporaryDirectory() as tmp:
         src, dst = fixture(pathlib.Path(tmp))
@@ -2384,6 +2406,7 @@ if __name__ == "__main__":
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
              test_dual_filter_and_mouse_focus, test_editor_fallback_and_arguments, test_mouse_rename_directory_wide_bar,
              test_move_multiple_relative_destination, test_f2_rename_and_no_overwrite, test_f4_editor_interactive,
+             test_f4_bundled_fmedit_save_and_return,
              test_move_no_overwrite_and_cancel, test_copy_multiple, test_cut_move, test_mkdir_and_delete, test_no_overwrite,
              test_filename_with_spaces, test_delete_cancelled, test_no_copy_into_self,
              test_mouse_double_click_opens_folder, test_mouse_button_mkdir,

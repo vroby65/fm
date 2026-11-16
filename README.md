@@ -1,6 +1,6 @@
 # fm
 
-Questa è la versione italiana, mantenuta nel branch `italiano`. La versione inglese è nel [branch `main`](https://github.com/vroby65/fm/tree/main). Per scegliere questa versione in un clone, eseguire `git switch italiano`.
+Questo è il branch `italiano`; il branch principale è [main](https://github.com/vroby65/fm/tree/main). Per scegliere questo branch in un clone, eseguire `git switch italiano`.
 
 File manager **TUI a uno o due pannelli**, ispirato ai tasti funzione di Midnight Commander e pensato per una piccola finestra terminale in **ai-bar**.
 
@@ -10,26 +10,25 @@ ASCII fallback. No ncurses, dialog, fzf or TUI libraries. Local operations requi
 Bash, `stty` and basic GNU utilities, including `cp`, `mv`, `mkdir`, `rm`, `grep`,
 `stat`, `numfmt` and `fold`.
 
-`main` contains the English version. The [italiano branch](https://github.com/vroby65/fm/tree/italiano)
-contains the Italian version. In a clone, use `git switch italiano` to select it.
-Functional updates must be ported to each branch while retaining its language.
+Le istruzioni di questo README si riferiscono al branch `italiano`. I precedenti
+merge hanno allineato i sorgenti e i test alla versione inglese di `main`;
+attualmente anche in questo branch interfaccia e conferme sono in inglese.
 
-## Quick installation
+## Installazione rapida
 
-Download and install the English version in `~/.local/bin`, without sudo,
-compilation or cloning the repository:
-
-```bash
-mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
-```
-
-For the Italian version, use this command instead:
+Installare `fm` e `fmedit` da questo branch in `~/.local/bin`, senza sudo,
+compilazione o clone:
 
 ```bash
-mkdir -p "$HOME/.local/bin" && curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" && chmod +x "$HOME/.local/bin/fm"
+mkdir -p "$HOME/.local/bin" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fm" -o "$HOME/.local/bin/fm" &&
+curl -fsSL "https://raw.githubusercontent.com/vroby65/fm/italiano/fmedit" -o "$HOME/.local/bin/fmedit" &&
+chmod +x "$HOME/.local/bin/fm" "$HOME/.local/bin/fmedit"
 ```
 
-Ripetere il comando di installazione scarica la versione italiana aggiornata da `italiano`. Per il download e' necessario `curl`; il file manager in esecuzione non richiede `curl` ne' librerie TUI. Se `~/.local/bin` e' gia' nel `PATH`, basta digitare `fm` (anche da Fish).
+Ripetere i comandi per aggiornare entrambi. Per scaricare serve `curl`.
+Eseguire `fm` o `fmedit` se `~/.local/bin` è nel PATH (anche da Fish).
+Per la versione del branch `main`, sostituire `/italiano/` con `/main/` nell'URL.
 
 ## Getting started
 
@@ -44,6 +43,7 @@ Install from the checked-out source with:
 
 ```bash
 install -Dm755 fm "$HOME/.local/bin/fm"
+install -Dm755 fmedit "$HOME/.local/bin/fmedit"
 ```
 
 Requires an interactive terminal of at least **35 columns × 12 rows**; **70+
@@ -61,6 +61,23 @@ ABFM_ASCII=1 fm
 ```
 
 `NO_COLOR` also disables colors. Unicode frames depend on a UTF-8 locale.
+
+## Editor incluso: fmedit
+
+Il repository comprende anche `fmedit`, editor Bash autonomo, la sua
+[guida d'uso](FMEDIT.md) e `tests/test_editor.py`. I comandi sopra installano
+entrambi i programmi da questo repository. Avviare `fmedit appunti.txt`, oppure
+sceglierlo per **F4** in fm:
+
+```bash
+EDITOR=fmedit fm
+```
+
+Dal checkout senza installazione: `EDITOR="$PWD/fmedit" ./fm`. F4 continua a
+usare `$EDITOR`, con fallback a `nano` se non impostato. L'installazione non cambia
+EDITOR né le associazioni MIME. **F2 / Ctrl+S** salva, **F10** salva ed esce,
+**Esc / Ctrl+Q** chiede come gestire le modifiche non salvate. La guida descrive
+selezione, appunti, annulla/ripeti, ricerca e limiti.
 
 ## Theme and navigation
 
@@ -364,7 +381,9 @@ use only the Python standard library:
 
 ```bash
 bash -n fm
+bash -n fmedit
 python3 tests/smoke.py
+python3 -m unittest discover -s tests -p test_editor.py -v
 shellcheck -S warning fm    # when installed
 ```
 
