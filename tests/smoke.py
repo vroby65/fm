@@ -1192,6 +1192,29 @@ def test_ascii_fallback():
             s.close()
 
 
+def test_ascii_no_color_cursor():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "alpha").touch()
+        (root / "beta").touch()
+        session = Session(root, env={"ABFM_ASCII": "1", "ABFM_NO_COLOR": "1"})
+        try:
+            assert b"\x1b[5;1H|>   alpha" in session.output
+            start = len(session.output)
+            session.key(F3)
+            assert b"\x1b[5;1H| *  alpha" in session.output[start:]
+            assert b"\x1b[6;1H|>   beta" in session.output[start:]
+            session.key(UP)
+            assert b"\x1b[5;1H|>*  alpha" in session.output[start:]
+            session.resize(120)
+            start = len(session.output)
+            session.key(b"\t")
+            assert b"\x1b[5;1H| *  alpha" in session.output[start:]
+            assert b"\x1b[5;61H|>   alpha" in session.output[start:]
+        finally:
+            session.close()
+
+
 def test_hidden_and_mc_directory_prefix():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2300,27 +2323,38 @@ def test_ctrl_h_hidden_files_and_filter():
             session.close()
 
 
-def test_ctrl_h_independent_panes_and_resize():
+def test_hidden_shortcuts_share_panes_and_resize():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
-        (root / ".secret").write_text("segreto")
-        session = Session(root, cols=120)
+        src, dest = fixture(root)
+        (src / ".secret-left").write_text("needle")
+        (dest / ".secret-right").write_text("needle")
+        session = Session(src, cols=120)
         try:
-            session.key(b"\x08")  # nascosti a sinistra
             session.key(b"\t")
-            session.resize(80)
-            start = len(session.output)
-            session.key(b"r")
-            assert b".secret" in session.output[start:]
-            session.resize(120)
-            session.key(b"\t")  # torna a sinistra
-            session.resize(80)
-            start = len(session.output)
-            session.key(b"r")
-            assert b".secret" not in session.output[start:]
+            session.key(LEFT)
+            session.key(UP)
+            session.key(ENTER)  # dest nel pannello destro
+            for _ in range(2):
+                session.key(b"\x06")
+                session.key(b"\t")
+                session.type("needle")
+                session.key(ENTER)
+                session.key(b"\t")
             start = len(session.output)
             session.key(b"\x08")
-            assert b".secret" in session.output[start:]
+            assert b"Hidden files hidden." in session.output[start:]
+            assert b".secret-" not in session.output[start:]
+            session.resize(80)
+            start = len(session.output)
+            session.key(b"\x1b.")
+            assert b".secret-right" in session.output[start:]
+            session.resize(120)
+            start = len(session.output)
+            session.key(b"\t")
+            assert b".secret-left" in session.output[start:]
+            assert b".secret-right" in session.output[start:]
+            assert b"alpha.txt" not in session.output[start:]
         finally:
             session.close()
 
@@ -2382,6 +2416,9 @@ def test_english_help_and_delete_confirmation():
     help_text = subprocess.check_output([SCRIPT, "--help"], env={**os.environ, "LC_ALL": "C.UTF-8"})
     assert b"Usage: fm" in help_text
     assert b"Environment options:" in help_text
+    assert b"Ctrl+h / Alt+." in help_text
+    assert b"Ctrl+x then c" in help_text
+    assert b"Ctrl+x then s" in help_text
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         target = root / "keep.txt"
@@ -2401,7 +2438,7 @@ def test_english_help_and_delete_confirmation():
 
 if __name__ == "__main__":
     tests = [test_english_help_and_delete_confirmation, test_content_filter_panes_cache_and_refresh, test_filter_dialog_mouse_buttons_and_editing, test_filter_dialog_content_and_actions, test_filter_dialog_cancel_resize_and_content_only, test_connection_shortcuts_create_open_rename_delete_and_restart, test_connection_shortcuts_existing_broken_and_duplicate, test_question_help_scroll_resize_and_return, test_remote_bookmark_uri_reconnects_to_saved_directory, test_bookmark_requires_a_source_pane, test_open_document_by_keyboard_and_double_click, test_open_document_error_and_broken_link, test_real_gio_uses_isolated_mime_association, test_scrolling_redraws_only_active_list, test_queued_navigation_keeps_following_command_responsive, test_escape_digit_and_insert_decoding, test_selection_keys_advance_and_stop_at_last_entry, test_escape_then_digit_with_typing_delay, test_selected_symlink_target_in_status_line, test_saved_connections_import_only_once, test_saved_connections_rename_delete_and_restart, test_saved_connection_opens_prefilled_dialog_without_password, test_connections_menu_above_root_and_local_return, test_remote_connection_dialog_password_hidden_and_cancel, test_single_pane_transfer_uses_marked_absolute_source, test_pending_transfer_does_not_fall_back_when_source_disappears, test_directory_memory_is_independent_between_panes, test_directory_remembers_cursor_after_reentry, test_directory_remembers_marks_and_drops_missing_files, test_f1_menu_mouse_scroll_and_resize, test_f1_mc_menu_context_macros_and_prompt, test_f1_mc_menu_tagged_and_opposite_directory, test_file_operations_retry_with_sudo, test_rename_dialog_edit_cancel_and_mouse, test_column_separators_continue_through_empty_rows, test_q_does_not_quit, test_filter_dialog_spaces_backspace_and_escape, test_filter_dialog_and_enter_opens_or_runs, test_parent_reselects_departed_directory, test_attributes_sudo_retry_and_cancel, test_ctrl_x_unified_dialog, test_permission_dialog_mouse_buttons_and_resize, test_chown_mc_lists_and_cancel, test_dual_move_directory_and_failure_reasons, test_size_and_modification_columns, test_filter_clears_on_choice_and_keeps_current_file,
-             test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_ctrl_h_independent_panes_and_resize,
+             test_filter_clears_on_directory_open_and_double_click, test_ctrl_h_hidden_files_and_filter, test_hidden_shortcuts_share_panes_and_resize,
              test_resize_preserves_panes_and_selection, test_dual_no_overwrite_and_literal_filter,
              test_filter_names_and_reset, test_dual_copy_move_and_independent_selection,
              test_dual_filter_and_mouse_focus, test_editor_fallback_and_arguments, test_mouse_rename_directory_wide_bar,
@@ -2412,7 +2449,7 @@ if __name__ == "__main__":
              test_mouse_double_click_opens_folder, test_mouse_button_mkdir,
              test_mouse_prompt_ignores_click, test_mouse_mark_copy,
              test_mouse_compact_bar_and_wheel, test_reference_palette_and_highlighting,
-             test_no_color_fallback, test_ascii_fallback,
+             test_no_color_fallback, test_ascii_fallback, test_ascii_no_color_cursor,
              test_hidden_and_mc_directory_prefix, test_mouse_exact_columns_and_rows,
              test_no_flicker_on_cursor_navigation,
              test_lynx_arrows_enter_and_back, test_millis_italian_decimal_comma,

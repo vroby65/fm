@@ -55,8 +55,11 @@ install -Dm755 fm "$HOME/.local/bin/fm"
 install -Dm755 fmedit "$HOME/.local/bin/fmedit"
 ```
 
-Requires an interactive terminal of at least **35 columns × 12 rows**; **70+
-columns** are recommended. For an embedded terminal managing its own screen:
+Requires an interactive terminal of at least **35 columns × 12 rows**. **70+
+columns** are recommended. By default, `fm` draws in the terminal's alternate
+screen, a separate display buffer. When `fm` exits, the terminal switches back to
+the shell's previous display. Set `ABFM_NO_ALT_SCREEN=1` to draw directly in the
+main screen, for example inside an embedded terminal that manages its own screen.
 
 ```bash
 ABFM_NO_ALT_SCREEN=1 fm
@@ -69,7 +72,8 @@ ABFM_NO_COLOR=1 fm
 ABFM_ASCII=1 fm
 ```
 
-`NO_COLOR` also disables colors. Unicode frames depend on a UTF-8 locale.
+`NO_COLOR` also disables colors. With colors disabled, `>` marks the row under
+the cursor. Unicode frames depend on a UTF-8 locale.
 
 ## Included editor: fmedit
 
@@ -105,7 +109,7 @@ Navigation follows Lynx conventions: **Up/Down** (or `k`/`j`) moves the highligh
 row; **Right/Enter** (or `l`) opens it; **Left/Backspace** (or `h`) goes to the
 parent, highlighting the directory just left. `/..` does the same. Directories
 have a `/` prefix, symbolic links an `@`. **Hidden files and directories (`.name`)
-are visible by default**; Ctrl+H toggles them in the active pane.
+are visible by default**. Ctrl+h or Alt+. toggles them in both panes.
 
 Double-click timing accepts either a comma or a dot in `EPOCHREALTIME`, including
 Italian locales.
@@ -115,7 +119,7 @@ Italian locales.
 Press **?** while navigating to open scrollable help. **Up/Down**, **PgUp/PgDn**,
 **Home/End** and the mouse wheel scroll; **Enter**, **Esc**, **?**, **F10** or the
 **Close** button returns to the pane. Help also works in Connections and adapts
-to resize. In the Ctrl+F dialog, `?` remains literal search text.
+to resize. In the Ctrl+f dialog, `?` remains literal search text.
 
 | Key | Action |
 | --- | --- |
@@ -129,11 +133,11 @@ to resize. In the Ctrl+F dialog, `?` remains literal search text.
 | **F7** | Create a directory; type its name and press Enter |
 | **F8** | Delete selected files/directories after confirmation (`y`) |
 | **F10** | Quit and restore the terminal (`q` and `Q` do not quit) |
-| **Ctrl+X**, then **C** | Open permissions, owner and group dialog |
-| **Ctrl+X**, then **S** / **Ctrl+S** | Create an absolute symbolic link `<name>.lnk` |
+| **Ctrl+x**, then **c** | Open permissions, owner and group dialog |
+| **Ctrl+x**, then **s** / **Ctrl+s** | Create an absolute symbolic link `<name>.lnk` |
 | **Tab** | Switch panes when both are visible |
-| **Ctrl+H** | Toggle hidden files and directories in the active pane |
-| **Ctrl+F** | Filter by file name and content in the current directory |
+| **Ctrl+h** / **Alt+.** | Toggle hidden files and directories in both panes |
+| **Ctrl+f** | Filter by file name and content in the current directory |
 | ↑ / ↓, `k` / `j` | Move the cursor |
 | PgUp / PgDn, Home / End | Navigate quickly |
 | **Right** / Enter / `l` | Open a directory/document or run an executable |
@@ -165,9 +169,9 @@ operations use the highlighted entry.
 
 At **100 columns** or more, two panes appear automatically, initially in the same
 directory. **Tab** or a click switches the active pane, marked `*` in its title.
-Each side retains its directory, cursor, scroll, selection, filter and hidden-file
-setting. Narrowing the window leaves the active pane visible; widening restores
-both and their state.
+Each side retains its directory, cursor, scroll, selection and filter. Hidden-file
+visibility is shared. Narrowing the window leaves the active pane visible;
+widening restores both.
 
 Open a destination in one pane, Tab back to the source, mark files with **F3**,
 then press **F5** to copy or **F6** to move. Both lists refresh afterward. Existing
@@ -192,8 +196,8 @@ place; Ctrl+F edits the criteria and Esc clears them.
 Clicking a row, marking with F3, opening an entry or running file operations clears
 the filter while preserving the highlighted entry and marks. Applying a filter
 clears pane marks. Each pane remembers its criteria; results are cached across
-redraws and **r** repeats the search. **Ctrl+H** includes/excludes hidden entries
-from the search too.
+redraws and **r** repeats the search. **Ctrl+h** and **Alt+.** also update whether
+hidden entries are included in each pane's search results.
 
 ## This PC, SSH and FTP
 

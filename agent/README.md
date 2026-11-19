@@ -52,13 +52,14 @@ programs and editors receive the original terminal.
 ## Panes, filters and navigation
 
 At 100 columns there are two panes. Tab/mouse switches sides; `save_pane` and
-`load_pane` retain directory, cursor, scroll, filter, hidden-file visibility and
-marks. Columns Name, Size (bytes, IEC above ten digits) and Last modified (local
-`dd/mm/yyyy hh:mm`) have headings at row 3 and data from row 4. `entry_columns`
+`load_pane` retain directory, cursor, scroll, filter and marks. Hidden-file
+visibility is shared. Columns Name, Size (bytes, IEC above ten digits) and
+Last modified (local `dd/mm/yyyy hh:mm`) have headings at row 3 and data from row 4. `entry_columns`
 maintains widths/separators in Unicode/ASCII, including empty rows to the bottom.
 The palette uses dark gray, muted yellow and teal selection; column headings use
-MC's bright bold ANSI yellow (`CLR_HEADER`). `draw_panel` uses local Bash state to
-render the inactive pane without changing the active one.
+MC's bright bold ANSI yellow (`CLR_HEADER`). Without colors, the active cursor
+uses `>` in the padding immediately before the selection mark. `draw_panel` uses
+local Bash state to render the inactive pane without changing the active one.
 
 Ctrl+F opens `filter_items`, with local name/text fields and Search/Cancel buttons.
 Enter applies `filter` and `content_filter` together; Esc/F10 cancel without
@@ -68,16 +69,17 @@ regular files, excluding symlinks and binaries. Fields support Tab/mouse, arrows
 Home/End/Backspace/Delete/Ctrl+U. `pane_contents` parallels `pane_filters`;
 `search_cache`/`search_counts` retain each pane's results. `load_pane` calls
 `reload cached "$id"` to avoid rereading contents during redraw/focus changes.
-Applying criteria, r and Ctrl+H call reload without cache. `file_command` and return
-from `run_program` invalidate both panes' caches. Local state in draw_panel,
-menu_other_panel and add_shortcut includes content_filter.
+Applying criteria and r call reload without cache. Toggling hidden files,
+`file_command` and return from `run_program` invalidate both panes' caches. Local
+state in draw_panel, menu_other_panel and add_shortcut includes content_filter.
 
 Esc in a pane calls `clear_filter` for both fields. Enter/Right with zero matches
 does not navigate. Row clicks, F3, opening and operations clear filters while
 preserving the highlighted item and marks; screen position remains stable for
-double-clicks. Up/Down browse filtered results. Ctrl+H toggles dotfiles, clears
-selection and retains criteria. Ctrl+H uses 0x08; navigation Backspace uses 0x7f.
-Resize preserves both panes.
+double-clicks. Up/Down browse filtered results. Ctrl+h and Alt+. toggle dotfiles
+in both panes, clear selection in the active pane and retain both filter criteria.
+Ctrl+h uses 0x08, Alt+. uses Esc followed by a dot, and Backspace uses 0x7f.
+Resize preserves both panes and the shared visibility setting.
 
 `change_directory` retains session memory in `directory_focus`/`directory_scroll`
 per pane+cwd and `directory_marks` per pane+path (value cwd), then restores only
