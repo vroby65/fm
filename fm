@@ -20,17 +20,17 @@ One- or two-pane TUI file manager (Bash, no ncurses).
  F5                              copy to other pane (or ask for destination)
  F6                              move to other pane (or ask for destination)
  F7                              create a directory
- Ctrl+X S with connections root  bookmark the directory in the other pane
+ Ctrl+x s with connections root  bookmark the directory in the other pane
  F2 / F8 in Connections          rename / delete only the profile or shortcut
  F8                              delete (asks for confirmation)
  F10                             quit the file manager
  ?                               help and shortcuts (scrollable window)
  Esc then 1...9 / 0 (within 0.5s) same as F1...F9 / F10 (F9 unassigned)
- Ctrl+X then C                   permissions, owner and group
- Ctrl+X then S                   create a symbolic link (also Ctrl+S)
- Ctrl+S                          create absolute link <name>.lnk
- Ctrl+F                          filter dialog for file name and content text
- Ctrl+H                          show/hide hidden files and directories
+ Ctrl+x then c                   permissions, owner and group
+ Ctrl+x then s                   create a symbolic link (also Ctrl+s)
+ Ctrl+s                          create absolute link <name>.lnk
+ Ctrl+f                          filter dialog for file name and content text
+ Ctrl+h / Alt+.                  show/hide hidden files and directories in both panes
  Tab                             switch pane (from 100 columns)
  Mouse click                     select / double-click to open
  Mouse wheel                     scroll the list
@@ -85,7 +85,7 @@ MOUSE_BTN=0; MOUSE_X=0; MOUSE_Y=0; MOUSE_ACTION=''
 PENDING_CHAR=''
 active_pane=0 dual_pane=0 pane_x=1 pane_width=80 filter='' content_filter='' show_hidden=1 resized=0
 # State of both views; history is separate for each pane and directory.
-declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '') pane_contents=('' '') pane_hidden=(1 1)
+declare -a pane_dirs=("$cwd" "$cwd") pane_cursors=(1 1) pane_scrolls=(0 0) pane_filters=('' '') pane_contents=('' '')
 declare -A search_cache=() search_counts=()
 declare -A pane_marks=() directory_focus=() directory_scroll=() directory_marks=()
 # Source of the last explicit selection, used by F5/F6 in single-pane mode.
@@ -245,7 +245,6 @@ save_pane() {
     pane_scrolls[active_pane]=$scroll
     pane_filters[active_pane]=$filter
     pane_contents[active_pane]=$content_filter
-    pane_hidden[active_pane]=$show_hidden
     for key in "${!pane_marks[@]}"; do
         [[ $key == "$active_pane:"* ]] && unset 'pane_marks[$key]'
     done
@@ -259,7 +258,6 @@ load_pane() {
     cwd=${pane_dirs[id]}; cursor=${pane_cursors[id]}
     scroll=${pane_scrolls[id]}; filter=${pane_filters[id]}
     content_filter=${pane_contents[id]}
-    show_hidden=${pane_hidden[id]}
     reload cached "$id"
     for key in "${!pane_marks[@]}"; do
         [[ $key == "$id:"* ]] && marks["${key#*:}"]=1
@@ -497,7 +495,7 @@ column_header() {
 # Print the visible row at its actual terminal position (1-based).
 # Y=4 is the first row, after the frame, title and headings.
 paint_entry() {
-    local idx=$1 n item label selected kind row_style metadata bytes modified epoch
+    local idx=$1 n item label selected kind row_style metadata bytes modified epoch pointer=' '
     (( idx >= scroll && idx < scroll+visible )) || return 0
     n=$((idx-scroll))
     printf '\033[%d;%dH' "$((items_y+n))" "$pane_x" >&9
@@ -535,6 +533,7 @@ paint_entry() {
     fi
     [[ -v marks["$item"] ]] && row_style=$CLR_MARKED
     if (( idx == cursor && ${drawing_pane:-$active_pane} == active_pane )); then
+        (( USE_COLOR )) || pointer='>'
         row_style=$CLR_CURSOR
         [[ -v marks["$item"] ]] && row_style=$CLR_MARK_CURSOR
     fi
@@ -548,11 +547,11 @@ paint_entry() {
         if (( ${#bytes} > 10 )); then bytes=$(numfmt --to=iec --suffix=B "$bytes"); fi
         printf -v modified '%(%d/%m/%Y %H:%M)T' "$epoch"
     fi
-    entry_columns " $selected $kind$label" "$bytes" "$modified" "$row_style"
+    entry_columns "$pointer$selected $kind$label" "$bytes" "$modified" "$row_style"
 }
 
 draw_panel() {
-    local drawing_pane=$1 cwd cursor scroll filter content_filter show_hidden pane_x pane_width inner needs_full
+    local drawing_pane=$1 cwd cursor scroll filter content_filter pane_x pane_width inner needs_full
     local -a entries=()
     local -A marks=()
     local i title
@@ -685,6 +684,9 @@ input_key() {
             if [[ $next == [0-9] ]]; then
                 if [[ $next == 0 ]]; then KEY='F10'; else KEY="F$next"; fi
                 return 0
+            fi
+            if [[ $next == '.' ]]; then
+                KEY='HIDDEN'; return 0
             fi
             if [[ $next != '[' && $next != 'O' ]]; then
                 # Esc quickly followed by a letter: keep
@@ -1245,7 +1247,7 @@ menu_condition() {
 }
 
 menu_other_panel() {
-    local cwd cursor scroll filter content_filter show_hidden needs_full path
+    local cwd cursor scroll filter content_filter needs_full path
     local -a entries=()
     local -A marks=()
     load_pane "$((1-active_pane))"
@@ -1986,7 +1988,7 @@ add_shortcut() {
     local path name destination error root protocol address relative
     if [[ $cwd == "$connections_root" ]]; then
         path=$(
-            local cwd cursor scroll filter content_filter show_hidden needs_full
+            local cwd cursor scroll filter content_filter needs_full
             local -a entries=()
             local -A marks=()
             load_pane "$((1-active_pane))"
@@ -2341,7 +2343,7 @@ perform_key() {
                 return 0;;
             SYMLINK) create_symlink; return 0;;
             F8) delete_saved_connection; return 0;;
-            UP|DOWN|LEFT|RIGHT|BACK|HOME|END|PAGEUP|PAGEDOWN|ENTER|TAB|F10|ESC|'?'|k|j|h|l|r|R|q|Q) ;;
+            UP|DOWN|LEFT|RIGHT|BACK|HOME|END|PAGEUP|PAGEDOWN|ENTER|TAB|HIDDEN|F10|ESC|'?'|k|j|h|l|r|R|q|Q) ;;
             *) notice='Choose This PC, SSH or FTP.'; return 0;;
         esac
     fi
@@ -2364,7 +2366,8 @@ perform_key() {
         FILTER) filter_items;;
         HIDDEN)
             show_hidden=$((1-show_hidden))
-            cursor=1; scroll=0
+            search_counts=()
+            if [[ $cwd != "$connections_root" ]]; then cursor=1; scroll=0; fi
             reload
             if (( show_hidden )); then notice='Hidden files visible.'
             else notice='Hidden files hidden.'; fi
